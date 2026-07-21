@@ -68,7 +68,22 @@ class AgentDatasourceControllerTest {
 		when(agentDatasourceService.getCurrentAgentDatasource(1L)).thenReturn(ds);
 		when(agentDatasourceService.initializeSchemaForAgentWithDatasource(1L, 1, List.of("users"))).thenReturn(false);
 
-		assertThrows(InternalServerException.class, () -> controller.initSchema(1L));
+		InternalServerException exception = assertThrows(InternalServerException.class, () -> controller.initSchema(1L));
+		assertEquals("Schema初始化失败", exception.getMessage());
+	}
+
+	@Test
+	void initSchema_serviceThrows_preservesFailureReason() {
+		AgentDatasource ds = new AgentDatasource();
+		ds.setDatasourceId(1);
+		ds.setSelectTables(List.of("users"));
+		when(agentDatasourceService.getCurrentAgentDatasource(1L)).thenReturn(ds);
+		when(agentDatasourceService.initializeSchemaForAgentWithDatasource(1L, 1, List.of("users")))
+			.thenThrow(new RuntimeException("Elasticsearch connection refused"));
+
+		InternalServerException exception = assertThrows(InternalServerException.class, () -> controller.initSchema(1L));
+		assertTrue(exception.getMessage().contains("Elasticsearch connection refused"));
+		assertNotNull(exception.getCause());
 	}
 
 	@Test

@@ -78,9 +78,12 @@ public class AgentDatasourceController {
 				throw new InternalServerException("Schema初始化失败");
 			}
 		}
+		catch (InternalServerException e) {
+			throw e;
+		}
 		catch (Exception e) {
 			log.error("Failed to initialize schema for agent: {}", agentId, e);
-			throw new InternalServerException("Schema初始化失败：%s".formatted(e.getMessage()));
+			throw new InternalServerException("Schema初始化失败：%s".formatted(e.getMessage()), e);
 		}
 	}
 
