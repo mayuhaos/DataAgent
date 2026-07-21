@@ -188,7 +188,7 @@ public class SchemaServiceImpl implements SchemaService {
 		}
 		catch (Exception e) {
 			log.error("Failed to process schema for datasource: {}", datasourceId, e);
-			return false;
+			throw e;
 		}
 	}
 

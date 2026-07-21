@@ -19,6 +19,7 @@ import com.alibaba.cloud.ai.dataagent.bo.DbConfigBO;
 import com.alibaba.cloud.ai.dataagent.bo.schema.ForeignKeyInfoBO;
 import com.alibaba.cloud.ai.dataagent.constant.DocumentMetadataConstant;
 import com.alibaba.cloud.ai.dataagent.connector.accessor.AccessorFactory;
+import com.alibaba.cloud.ai.dataagent.dto.datasource.SchemaInitRequest;
 import com.alibaba.cloud.ai.dataagent.dto.schema.SchemaDTO;
 import com.alibaba.cloud.ai.dataagent.dto.schema.TableDTO;
 import com.alibaba.cloud.ai.dataagent.properties.DataAgentProperties;
@@ -109,6 +110,20 @@ class SchemaServiceImplTest {
 		meta.put("tableName", tableName);
 		meta.put("vectorType", "COLUMN");
 		return new Document("column: " + columnName, meta);
+	}
+
+	@Test
+	void schema_accessorFailure_propagatesOriginalException() {
+		DbConfigBO dbConfig = new DbConfigBO();
+		SchemaInitRequest request = new SchemaInitRequest();
+		request.setDbConfig(dbConfig);
+		request.setTables(List.of("users"));
+		RuntimeException failure = new RuntimeException("database connection refused");
+		when(accessorFactory.getAccessorByDbConfig(dbConfig)).thenThrow(failure);
+
+		Exception exception = assertThrows(Exception.class, () -> schemaService.schema(1, request));
+
+		assertSame(failure, exception);
 	}
 
 	@Test
