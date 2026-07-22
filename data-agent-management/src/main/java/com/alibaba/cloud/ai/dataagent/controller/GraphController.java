@@ -27,6 +27,8 @@ import org.springframework.web.bind.annotation.*;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Sinks;
 
+import java.time.Duration;
+
 import static com.alibaba.cloud.ai.dataagent.constant.Constant.STREAM_EVENT_COMPLETE;
 import static com.alibaba.cloud.ai.dataagent.constant.Constant.STREAM_EVENT_ERROR;
 
@@ -40,6 +42,8 @@ import static com.alibaba.cloud.ai.dataagent.constant.Constant.STREAM_EVENT_ERRO
 @CrossOrigin(origins = "*")
 @RequestMapping("/api")
 public class GraphController {
+
+	private static final Duration STREAM_HEARTBEAT_INTERVAL = Duration.ofSeconds(15);
 
 	private final GraphService graphService;
 
@@ -81,14 +85,20 @@ public class GraphController {
 			.build();
 		graphService.graphStreamProcess(sink, request);
 
-		return sink.asFlux().filter(sse -> {
+		Flux<ServerSentEvent<GraphNodeResponse>> eventStream = sink.asFlux().filter(sse -> {
 			// 1. 如果 event 是 "complete" 或 "error"，直接放行（不管 text 是否为空）
 			if (STREAM_EVENT_COMPLETE.equals(sse.event()) || STREAM_EVENT_ERROR.equals(sse.event())) {
 				return true;
 			}
 			// 判断字符串是否为空
 			return sse.data() != null && sse.data().getText() != null && !sse.data().getText().isEmpty();
-		})
+		});
+		Flux<ServerSentEvent<GraphNodeResponse>> heartbeatStream = Flux
+			.interval(STREAM_HEARTBEAT_INTERVAL, STREAM_HEARTBEAT_INTERVAL)
+			.map(sequence -> ServerSentEvent.<GraphNodeResponse>builder().comment("heartbeat").build());
+
+		return Flux.merge(eventStream, heartbeatStream)
+			.takeUntil(sse -> STREAM_EVENT_COMPLETE.equals(sse.event()) || STREAM_EVENT_ERROR.equals(sse.event()))
 			.doOnSubscribe(subscription -> log.info("Client subscribed to stream, threadId: {}", request.getThreadId()))
 			.doOnCancel(() -> {
 				log.info("Client disconnected from stream, threadId: {}", request.getThreadId());

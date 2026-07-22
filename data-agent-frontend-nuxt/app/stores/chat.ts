@@ -174,9 +174,21 @@ export const useChatStore = defineStore('chat', () => {
 		}
 		// Load global datasources (active)
 		try {
-			const list = await datasourceService.getAllDatasource('active');
+			const [list, agentDatasource] = await Promise.all([
+				datasourceService.getAllDatasource('active'),
+				agentDatasourceService
+					.getActiveAgentDatasource(agentId)
+					.catch(() => null),
+			]);
+			if (currentAgentId.value !== agentId) return;
+
 			allDatasources.value = list;
-			activeDatasource.value = list[0] || null;
+			const activeDatasourceId = agentDatasource?.datasourceId;
+			activeDatasource.value =
+				list.find((datasource) => datasource.id === activeDatasourceId) ||
+				agentDatasource?.datasource ||
+				list[0] ||
+				null;
 		} catch {
 			/* ignore */
 		}
