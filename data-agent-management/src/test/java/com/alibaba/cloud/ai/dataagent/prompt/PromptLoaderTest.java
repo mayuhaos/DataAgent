@@ -94,4 +94,14 @@ class PromptLoaderTest {
 		assertNotNull(PromptLoader.loadPrompt("evidence-query-rewrite"));
 	}
 
+	@Test
+	void loadPrompt_pythonGenerator_usesJsonCompatibleSerialization() {
+		String content = PromptLoader.loadPrompt("python-generator");
+
+		assertNotNull(content);
+		assertTrue(content.contains("default=json_default"));
+		assertTrue(content.contains("isinstance(value, np.integer)"));
+		assertFalse(content.contains("pd.to_numeric(df[col], errors='ignore')"));
+	}
+
 }
