@@ -36,6 +36,7 @@
 					prepend-icon="mdi-sync"
 					class="text-none px-6"
 					elevation="0"
+					disabled
 					:loading="refreshLoading"
 					@click="handleRefreshVectorStore"
 				>
