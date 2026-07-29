@@ -11,10 +11,23 @@ springdoc:
 spring:
   codec:
     max-in-memory-size: ${DATA_AGENT_MAX_IN_MEMORY_SIZE:10MB}
+  elasticsearch:
+    uris: ${DATA_AGENT_ELASTICSEARCH_URIS:http://mxdemo1.qunl.com:9200}
+    username: ${DATA_AGENT_ELASTICSEARCH_USERNAME:elastic}
+    password: ${DATA_AGENT_ELASTICSEARCH_PASSWORD:up_-gDZaqHoHNdDFD5CY}
+    restclient:
+      ssl:
+        bundle: elasticsearch
+  ssl:
+    bundle:
+      pem:
+        elasticsearch:
+          truststore:
+            certificate: classpath:elasticsearch/http_ca.crt
   datasource:
-    url: ${DATA_AGENT_DATASOURCE_URL:jdbc:mysql://127.0.0.1:3306/saa_data_agent?useUnicode=true&characterEncoding=utf-8&zeroDateTimeBehavior=convertToNull&transformedBitIsBoolean=true&allowMultiQueries=true&allowPublicKeyRetrieval=true&useSSL=false&serverTimezone=Asia/Shanghai}
+    url: ${DATA_AGENT_DATASOURCE_URL:jdbc:mysql://mxdemo1.qunl.com:3307/saa_data_agent?useUnicode=true&characterEncoding=utf-8&zeroDateTimeBehavior=convertToNull&transformedBitIsBoolean=true&allowMultiQueries=true&allowPublicKeyRetrieval=true&useSSL=false&serverTimezone=Asia/Shanghai}
     username: ${DATA_AGENT_DATASOURCE_USERNAME:root}
-    password: ${DATA_AGENT_DATASOURCE_PASSWORD:root}
+    password: ${DATA_AGENT_DATASOURCE_PASSWORD:Hangju@2025@root}
     driver-class-name: com.mysql.cj.jdbc.Driver
   sql:
     init:
@@ -31,7 +44,12 @@ spring:
           jdbc:
             initialize-schema: always
     vectorstore:
-      type: simple
+      type: elasticsearch
+      elasticsearch:
+        index-name: spring-ai-document-index
+        initialize-schema: true
+        dimensions: 1024
+        similarity: cosine
     alibaba:
       data-agent:
         vector-store:
