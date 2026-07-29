@@ -219,6 +219,15 @@
 									color="primary"
 									@click="navigateToPath('/knowledge/semantic-models')"
 								/>
+								<v-list-item
+									prepend-icon="mdi-table-eye"
+									title="数据库元数据"
+									:active="isActive('/knowledge/database-metadata')"
+									density="compact"
+									class="rounded-lg mb-1 navigation-sub-item"
+									color="primary"
+									@click="navigateToPath('/knowledge/database-metadata')"
+								/>
 							</v-list-group>
 
 							<v-list-group value="system">
@@ -365,6 +374,7 @@ const routeTitleMap: Record<string, string> = {
 	'/knowledge/business': '业务知识配置',
 	'/knowledge/agents': '智能体知识库',
 	'/knowledge/semantic-models': '语义模型配置',
+	'/knowledge/database-metadata': '数据库元数据',
 	'/system/data-sources': '数据连接',
 	'/system/model-config': '模型配置',
 	'/system/settings': '通用设置',

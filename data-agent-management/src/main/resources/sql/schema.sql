@@ -153,6 +153,18 @@ CREATE TABLE IF NOT EXISTS agent_datasource (
   FOREIGN KEY (datasource_id) REFERENCES datasource(id) ON DELETE CASCADE
 ) ENGINE = InnoDB COMMENT = '智能体数据源关联表';
 
+-- 智能体数据库元数据快照表
+CREATE TABLE IF NOT EXISTS agent_schema_metadata_snapshot (
+  agent_id BIGINT NOT NULL COMMENT '智能体ID',
+  datasource_id INT NOT NULL COMMENT '生成快照时使用的数据源ID',
+  metadata_json LONGTEXT NOT NULL COMMENT '脱敏后的数据库元数据JSON快照',
+  generated_at DATETIME NOT NULL COMMENT '快照生成时间',
+  PRIMARY KEY (agent_id),
+  INDEX idx_schema_metadata_datasource_id (datasource_id),
+  FOREIGN KEY (agent_id) REFERENCES agent(id) ON DELETE CASCADE,
+  FOREIGN KEY (datasource_id) REFERENCES datasource(id) ON DELETE CASCADE
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT = '智能体数据库元数据快照表';
+
 -- 智能体预设问题表
 CREATE TABLE IF NOT EXISTS agent_preset_question (
   id INT NOT NULL AUTO_INCREMENT,

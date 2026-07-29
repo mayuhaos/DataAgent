@@ -17,10 +17,12 @@ package com.alibaba.cloud.ai.dataagent.controller;
 
 import com.alibaba.cloud.ai.dataagent.dto.datasource.ToggleDatasourceDTO;
 import com.alibaba.cloud.ai.dataagent.dto.datasource.UpdateDatasourceTablesDTO;
+import com.alibaba.cloud.ai.dataagent.dto.schema.AgentSchemaMetadataDTO;
 import com.alibaba.cloud.ai.dataagent.entity.AgentDatasource;
 import com.alibaba.cloud.ai.dataagent.exception.InternalServerException;
 import com.alibaba.cloud.ai.dataagent.exception.InvalidInputException;
 import com.alibaba.cloud.ai.dataagent.service.datasource.AgentDatasourceService;
+import com.alibaba.cloud.ai.dataagent.service.schema.AgentSchemaMetadataService;
 import com.alibaba.cloud.ai.dataagent.vo.ApiResponse;
 import java.util.List;
 import java.util.Optional;
@@ -41,6 +43,8 @@ import org.springframework.web.bind.annotation.*;
 public class AgentDatasourceController {
 
 	private final AgentDatasourceService agentDatasourceService;
+
+	private final AgentSchemaMetadataService agentSchemaMetadataService;
 
 	/**
 	 * Initialize agent's database Schema to vector storage Corresponds to the "Initialize
@@ -112,6 +116,28 @@ public class AgentDatasourceController {
 		catch (Exception e) {
 			log.error("Failed to get active datasource for agent: {}", agentId, e);
 			throw new InvalidInputException("获取数据源失败：%s".formatted(e.getMessage()), List.of());
+		}
+	}
+
+	@GetMapping("/metadata")
+	public ApiResponse<AgentSchemaMetadataDTO> getMetadata(@PathVariable Long agentId) {
+		try {
+			return ApiResponse.success("获取数据库元数据成功", agentSchemaMetadataService.getMetadata(agentId));
+		}
+		catch (Exception e) {
+			log.error("Failed to get schema metadata for agent: {}", agentId, e);
+			throw new InternalServerException("获取数据库元数据失败：%s".formatted(e.getMessage()), e);
+		}
+	}
+
+	@PostMapping("/metadata/refresh")
+	public ApiResponse<AgentSchemaMetadataDTO> refreshMetadata(@PathVariable Long agentId) {
+		try {
+			return ApiResponse.success("数据库元数据同步成功", agentSchemaMetadataService.refreshMetadata(agentId));
+		}
+		catch (Exception e) {
+			log.error("Failed to refresh schema metadata for agent: {}", agentId, e);
+			throw new InternalServerException("数据库元数据同步失败：%s".formatted(e.getMessage()), e);
 		}
 	}
 

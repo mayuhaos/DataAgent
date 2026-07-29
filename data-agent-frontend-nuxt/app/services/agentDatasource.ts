@@ -28,12 +28,52 @@ export interface AgentDatasource {
 	datasourceId?: number;
 	isActive?: number;
 	selectTables?: string[];
-	datasource?: any;
+	datasource?: unknown;
 }
 
 export interface UpdateDatasourceTablesDto {
 	datasourceId?: number;
 	tables?: string[];
+}
+
+export interface SchemaColumnMetadata {
+	columnName: string;
+	columnComment: string;
+	displayName: string;
+	dataType: string;
+	primaryKey: boolean;
+	nullable: boolean;
+	samples: string[];
+}
+
+export interface SchemaTableMetadata {
+	schemaName: string;
+	tableName: string;
+	tableComment: string;
+	displayName: string;
+	primaryKeys: string[];
+	columns: SchemaColumnMetadata[];
+}
+
+export interface SchemaRelationMetadata {
+	sourceTable: string;
+	sourceColumn: string;
+	targetTable: string;
+	targetColumn: string;
+	relationType: 'PHYSICAL' | 'LOGICAL';
+	cardinality?: string;
+	description?: string;
+}
+
+export interface AgentSchemaMetadata {
+	agentId: number;
+	datasourceId: number;
+	metadataReady: boolean;
+	selectedTableCount: number;
+	loadedTableCount: number;
+	missingTables: string[];
+	tables: SchemaTableMetadata[];
+	relations: SchemaRelationMetadata[];
 }
 
 const BASE_URL_FUNC = (agentId: string) => `/api/agent/${agentId}/datasources`;
@@ -56,6 +96,29 @@ class AgentDatasourceService {
 	async getActiveAgentDatasource(agentId: string): Promise<ApiResponse<AgentDatasource>> {
 		return await $fetch<ApiResponse<AgentDatasource>>(
 			`${BASE_URL_FUNC(agentId)}/active`,
+		);
+	}
+
+	/**
+	 * 获取当前智能体保存在管理库中的数据库元数据快照。
+	 */
+	async getSchemaMetadata(
+		agentId: string,
+	): Promise<ApiResponse<AgentSchemaMetadata>> {
+		return await $fetch<ApiResponse<AgentSchemaMetadata>>(
+			`${BASE_URL_FUNC(agentId)}/metadata`,
+		);
+	}
+
+	/**
+	 * 直接从业务数据库同步当前智能体已选表的元数据，并保存管理库快照。
+	 */
+	async refreshSchemaMetadata(
+		agentId: string,
+	): Promise<ApiResponse<AgentSchemaMetadata>> {
+		return await $fetch<ApiResponse<AgentSchemaMetadata>>(
+			`${BASE_URL_FUNC(agentId)}/metadata/refresh`,
+			{ method: 'POST' },
 		);
 	}
 

@@ -17,9 +17,11 @@ package com.alibaba.cloud.ai.dataagent.controller;
 
 import com.alibaba.cloud.ai.dataagent.dto.datasource.ToggleDatasourceDTO;
 import com.alibaba.cloud.ai.dataagent.dto.datasource.UpdateDatasourceTablesDTO;
+import com.alibaba.cloud.ai.dataagent.dto.schema.AgentSchemaMetadataDTO;
 import com.alibaba.cloud.ai.dataagent.entity.AgentDatasource;
 import com.alibaba.cloud.ai.dataagent.exception.InternalServerException;
 import com.alibaba.cloud.ai.dataagent.service.datasource.AgentDatasourceService;
+import com.alibaba.cloud.ai.dataagent.service.schema.AgentSchemaMetadataService;
 import com.alibaba.cloud.ai.dataagent.vo.ApiResponse;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -39,11 +41,14 @@ class AgentDatasourceControllerTest {
 	@Mock
 	private AgentDatasourceService agentDatasourceService;
 
+	@Mock
+	private AgentSchemaMetadataService agentSchemaMetadataService;
+
 	private AgentDatasourceController controller;
 
 	@BeforeEach
 	void setUp() {
-		controller = new AgentDatasourceController(agentDatasourceService);
+		controller = new AgentDatasourceController(agentDatasourceService, agentSchemaMetadataService);
 	}
 
 	@Test
@@ -126,6 +131,44 @@ class AgentDatasourceControllerTest {
 
 		assertTrue(result.isSuccess());
 		assertEquals(1L, result.getData().getAgentId());
+	}
+
+	@Test
+	void getMetadata_success_returnsMetadata() {
+		AgentSchemaMetadataDTO metadata = AgentSchemaMetadataDTO.builder()
+			.agentId(1L)
+			.datasourceId(2)
+			.metadataReady(true)
+			.selectedTableCount(1)
+			.loadedTableCount(1)
+			.missingTables(List.of())
+			.tables(List.of())
+			.relations(List.of())
+			.build();
+		when(agentSchemaMetadataService.getMetadata(1L)).thenReturn(metadata);
+
+		ApiResponse<AgentSchemaMetadataDTO> result = controller.getMetadata(1L);
+
+		assertTrue(result.isSuccess());
+		assertSame(metadata, result.getData());
+	}
+
+	@Test
+	void refreshMetadata_success_returnsPersistedMetadata() {
+		AgentSchemaMetadataDTO metadata = AgentSchemaMetadataDTO.builder()
+			.agentId(1L)
+			.datasourceId(2)
+			.metadataReady(true)
+			.missingTables(List.of())
+			.tables(List.of())
+			.relations(List.of())
+			.build();
+		when(agentSchemaMetadataService.refreshMetadata(1L)).thenReturn(metadata);
+
+		ApiResponse<AgentSchemaMetadataDTO> result = controller.refreshMetadata(1L);
+
+		assertTrue(result.isSuccess());
+		assertSame(metadata, result.getData());
 	}
 
 	@Test

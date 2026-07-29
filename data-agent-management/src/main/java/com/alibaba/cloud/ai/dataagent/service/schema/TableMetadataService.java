@@ -241,7 +241,7 @@ public class TableMetadataService {
 			batchParam.setSql(sql);
 
 			ResultSetBO resultSet = accessor.executeSqlAndReturnObject(dbConfig, batchParam);
-			log.info("Embedding for table: {}, result size: {}", tableName, resultSet.getData().size());
+			log.info("Fetched sample data from table: {}, result size: {}", tableName, resultSet.getData().size());
 
 			return processResultSet(resultSet, columns);
 		}
