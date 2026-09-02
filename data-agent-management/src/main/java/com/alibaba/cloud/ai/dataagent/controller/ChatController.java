@@ -23,6 +23,7 @@ import com.alibaba.cloud.ai.dataagent.service.chat.ChatSessionService;
 import com.alibaba.cloud.ai.dataagent.service.chat.SessionTitleService;
 import com.alibaba.cloud.ai.dataagent.util.ReportTemplateUtil;
 import com.alibaba.cloud.ai.dataagent.vo.ApiResponse;
+import com.alibaba.cloud.ai.dataagent.vo.ChatExecutionResult;
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
@@ -93,6 +94,19 @@ public class ChatController {
 	public ResponseEntity<List<ChatMessage>> getSessionMessages(@PathVariable(value = "sessionId") String sessionId) {
 		List<ChatMessage> messages = chatMessageService.findBySessionId(sessionId);
 		return ResponseEntity.ok(messages);
+	}
+
+	/**
+	 * Get the SQL statements actually sent to the database and the returned
+	 * Markdown result for a session.
+	 */
+	@GetMapping("/sessions/{sessionId}/execution-result")
+	public ResponseEntity<ChatExecutionResult> getExecutionResult(
+			@PathVariable(value = "sessionId") String sessionId) {
+		if (chatSessionService.findBySessionId(sessionId) == null) {
+			return ResponseEntity.notFound().build();
+		}
+		return ResponseEntity.ok(chatMessageService.getExecutionResult(sessionId));
 	}
 
 	/**

@@ -17,6 +17,7 @@ package com.alibaba.cloud.ai.dataagent.service.chat;
 
 import com.alibaba.cloud.ai.dataagent.entity.ChatMessage;
 import com.alibaba.cloud.ai.dataagent.mapper.ChatMessageMapper;
+import com.alibaba.cloud.ai.dataagent.vo.ChatExecutionResult;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -80,6 +81,72 @@ class ChatMessageServiceImplTest {
 
 		assertSame(message, result);
 		verify(chatMessageMapper).insert(message);
+	}
+
+	@Test
+	void getExecutionResult_extractsOnlyExecutedSqlAndReportMarkdown() {
+		String timeline = """
+				[[
+				  {"nodeName":"SqlGenerateNode","textType":"SQL","text":"SELECT generated_only"},
+				  {"nodeName":"SqlExecuteNode","textType":"TEXT","text":"execute"},
+				  {"nodeName":"SqlExecuteNode","textType":"SQL","text":" SELECT actual_1 "},
+				  {"nodeName":"SqlExecuteNode","textType":"RESULT_SET","text":"{}"}
+				],[
+				  {"nodeName":"SqlExecuteNode","textType":"SQL","text":"SELECT actual_2"}
+				],[
+				  {"nodeName":"ReportGeneratorNode","textType":"MARK_DOWN","text":"# Report\\n"},
+				  {"nodeName":"ReportGeneratorNode","textType":"MARK_DOWN","text":"| value |\\n| --- |"}
+				]]
+				""";
+		when(chatMessageMapper.selectBySessionId("session-1"))
+			.thenReturn(List.of(ChatMessage.builder()
+				.id(1L)
+				.sessionId("session-1")
+				.role("assistant")
+				.messageType("timeline")
+				.content(timeline)
+				.build()));
+
+		ChatExecutionResult result = service.getExecutionResult("session-1");
+
+		assertEquals("session-1", result.getSessionId());
+		assertEquals(List.of("SELECT actual_1", "SELECT actual_2"), result.getSql());
+		assertEquals("# Report\n| value |\n| --- |", result.getResultMd());
+	}
+
+	@Test
+	void getExecutionResult_malformedTimelineFallsBackToLatestAssistantText() {
+		when(chatMessageMapper.selectBySessionId("session-1"))
+			.thenReturn(List.of(
+					ChatMessage.builder()
+						.id(1L)
+						.sessionId("session-1")
+						.role("assistant")
+						.messageType("timeline")
+						.content("not-json")
+						.build(),
+					ChatMessage.builder()
+						.id(2L)
+						.sessionId("session-1")
+						.role("assistant")
+						.messageType("text")
+						.content("## Final answer")
+						.build()));
+
+		ChatExecutionResult result = service.getExecutionResult("session-1");
+
+		assertTrue(result.getSql().isEmpty());
+		assertEquals("## Final answer", result.getResultMd());
+	}
+
+	@Test
+	void getExecutionResult_emptySessionReturnsEmptySqlAndNullMarkdown() {
+		when(chatMessageMapper.selectBySessionId("session-1")).thenReturn(List.of());
+
+		ChatExecutionResult result = service.getExecutionResult("session-1");
+
+		assertTrue(result.getSql().isEmpty());
+		assertNull(result.getResultMd());
 	}
 
 }
