@@ -13,29 +13,27 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package com.alibaba.cloud.ai.dataagent.service.chat;
-
-import com.alibaba.cloud.ai.dataagent.entity.ChatMessage;
-import com.alibaba.cloud.ai.dataagent.vo.ChatExecutionResult;
+package com.alibaba.cloud.ai.dataagent.vo;
 
 import java.util.List;
+import lombok.AllArgsConstructor;
+import lombok.Builder;
+import lombok.Data;
+import lombok.NoArgsConstructor;
 
-public interface ChatMessageService {
+/**
+ * Persisted SQL executions and Markdown result for a chat session.
+ */
+@Data
+@Builder
+@NoArgsConstructor
+@AllArgsConstructor
+public class ChatExecutionResult {
 
-	/**
-	 * Get message list by session ID
-	 */
-	List<ChatMessage> findBySessionId(String sessionId);
+	private String sessionId;
 
-	/**
-	 * Save message
-	 */
-	ChatMessage saveMessage(ChatMessage message);
+	private List<String> sql;
 
-	/**
-	 * Get SQL statements that reached the execution node and the returned Markdown
-	 * result from persisted session messages.
-	 */
-	ChatExecutionResult getExecutionResult(String sessionId);
+	private String resultMd;
 
 }

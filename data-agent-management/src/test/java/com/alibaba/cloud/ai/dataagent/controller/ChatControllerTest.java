@@ -23,6 +23,7 @@ import com.alibaba.cloud.ai.dataagent.service.chat.ChatSessionService;
 import com.alibaba.cloud.ai.dataagent.service.chat.SessionTitleService;
 import com.alibaba.cloud.ai.dataagent.util.ReportTemplateUtil;
 import com.alibaba.cloud.ai.dataagent.vo.ApiResponse;
+import com.alibaba.cloud.ai.dataagent.vo.ChatExecutionResult;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -101,6 +102,34 @@ class ChatControllerTest {
 
 		assertEquals(200, result.getStatusCode().value());
 		assertEquals(2, result.getBody().size());
+	}
+
+	@Test
+	void getExecutionResult_existingSession_returnsPersistedExecution() {
+		ChatSession session = ChatSession.builder().id("uuid-1").agentId(1).build();
+		ChatExecutionResult executionResult = ChatExecutionResult.builder()
+			.sessionId("uuid-1")
+			.sql(List.of("SELECT 1"))
+			.resultMd("# Result")
+			.build();
+		when(chatSessionService.findBySessionId("uuid-1")).thenReturn(session);
+		when(chatMessageService.getExecutionResult("uuid-1")).thenReturn(executionResult);
+
+		ResponseEntity<ChatExecutionResult> result = chatController.getExecutionResult("uuid-1");
+
+		assertEquals(200, result.getStatusCode().value());
+		assertEquals(List.of("SELECT 1"), result.getBody().getSql());
+		assertEquals("# Result", result.getBody().getResultMd());
+	}
+
+	@Test
+	void getExecutionResult_missingSession_returns404() {
+		when(chatSessionService.findBySessionId("missing")).thenReturn(null);
+
+		ResponseEntity<ChatExecutionResult> result = chatController.getExecutionResult("missing");
+
+		assertEquals(404, result.getStatusCode().value());
+		verify(chatMessageService, never()).getExecutionResult(anyString());
 	}
 
 	@Test

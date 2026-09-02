@@ -17,9 +17,14 @@ package com.alibaba.cloud.ai.dataagent.service.chat;
 
 import com.alibaba.cloud.ai.dataagent.entity.ChatMessage;
 import com.alibaba.cloud.ai.dataagent.mapper.ChatMessageMapper;
+import com.alibaba.cloud.ai.dataagent.util.JsonUtil;
+import com.alibaba.cloud.ai.dataagent.vo.ChatExecutionResult;
+import com.fasterxml.jackson.databind.JsonNode;
+import java.util.ArrayList;
 import lombok.AllArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
+import org.springframework.util.StringUtils;
 
 import java.util.List;
 
@@ -43,6 +48,67 @@ public class ChatMessageServiceImpl implements ChatMessageService {
 		chatMessageMapper.insert(message);
 		log.info("Saved message: {} for session: {}", message.getId(), message.getSessionId());
 		return message;
+	}
+
+	@Override
+	public ChatExecutionResult getExecutionResult(String sessionId) {
+		List<ChatMessage> messages = findBySessionId(sessionId);
+		List<String> executedSql = new ArrayList<>();
+		String timelineResultMd = null;
+		String fallbackResultMd = null;
+
+		for (ChatMessage message : messages) {
+			if (isAssistantResult(message)) {
+				fallbackResultMd = message.getContent();
+			}
+			if (!"timeline".equals(message.getMessageType()) || !StringUtils.hasText(message.getContent())) {
+				continue;
+			}
+
+			try {
+				JsonNode blocks = JsonUtil.getObjectMapper().readTree(message.getContent());
+				if (!blocks.isArray()) {
+					continue;
+				}
+				StringBuilder report = new StringBuilder();
+				for (JsonNode block : blocks) {
+					if (!block.isArray()) {
+						continue;
+					}
+					for (JsonNode response : block) {
+						String nodeName = response.path("nodeName").asText();
+						String textType = response.path("textType").asText();
+						String text = response.path("text").asText();
+						if (nodeName.endsWith("SqlExecuteNode") && "SQL".equals(textType)
+								&& StringUtils.hasText(text)) {
+							executedSql.add(text.trim());
+						}
+						if (nodeName.endsWith("ReportGeneratorNode") && "MARK_DOWN".equals(textType)) {
+							report.append(text);
+						}
+					}
+				}
+				if (StringUtils.hasText(report)) {
+					timelineResultMd = report.toString();
+				}
+			}
+			catch (Exception ex) {
+				log.warn("Skipping malformed timeline message: {} for session: {}", message.getId(), sessionId);
+			}
+		}
+
+		return ChatExecutionResult.builder()
+			.sessionId(sessionId)
+			.sql(executedSql)
+			.resultMd(timelineResultMd != null ? timelineResultMd : fallbackResultMd)
+			.build();
+	}
+
+	private boolean isAssistantResult(ChatMessage message) {
+		if (!"assistant".equals(message.getRole()) || !StringUtils.hasText(message.getContent())) {
+			return false;
+		}
+		return "markdown-report".equals(message.getMessageType()) || "text".equals(message.getMessageType());
 	}
 
 }
