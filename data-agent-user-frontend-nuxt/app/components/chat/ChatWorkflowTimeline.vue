@@ -256,6 +256,11 @@ const NODE_LABEL_MAP: Record<string, NodeDef> = {
 		label: 'SQL 执行',
 		icon: 'mdi-database-arrow-right',
 	},
+	LineageQueryNode: {
+		nodeName: 'LineageQueryNode',
+		label: '来源查询',
+		icon: 'mdi-file-search-outline',
+	},
 	PythonGenerateNode: {
 		nodeName: 'PythonGenerateNode',
 		label: 'Python 生成',

@@ -45,6 +45,7 @@ import reactor.core.publisher.Flux;
 import reactor.core.publisher.Sinks;
 
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
@@ -59,6 +60,7 @@ import static com.alibaba.cloud.ai.dataagent.constant.Constant.AWAITING_CLARIFIC
 import static com.alibaba.cloud.ai.dataagent.constant.Constant.AGENT_ID;
 import static com.alibaba.cloud.ai.dataagent.constant.Constant.CLARIFICATION_ANSWER;
 import static com.alibaba.cloud.ai.dataagent.constant.Constant.CLARIFICATION_COUNT;
+import static com.alibaba.cloud.ai.dataagent.constant.Constant.DATA_LINEAGE_SOURCES;
 import static com.alibaba.cloud.ai.dataagent.constant.Constant.HUMAN_FEEDBACK_DATA;
 import static com.alibaba.cloud.ai.dataagent.constant.Constant.HUMAN_FEEDBACK_NODE;
 import static com.alibaba.cloud.ai.dataagent.constant.Constant.HUMAN_REVIEW_ENABLED;
@@ -311,6 +313,9 @@ public class GraphServiceImpl implements GraphService {
 		state.put(REFINED_USER_QUERY, inputQuery);
 		state.put(CLARIFICATION_COUNT, clarificationCount);
 		state.put(AWAITING_CLARIFICATION, false);
+		// The graph checkpoint is shared by all turns of a thread. Lineage is
+		// execution-scoped, so every new question must start with an empty list.
+		state.put(DATA_LINEAGE_SOURCES, List.of());
 		if (StringUtils.hasText(clarificationAnswer)) {
 			state.put(CLARIFICATION_ANSWER, clarificationAnswer);
 		}
@@ -343,10 +348,13 @@ public class GraphServiceImpl implements GraphService {
 
 		Map<String, Object> feedbackData = Map.of("feedback", !graphRequest.isRejectedPlan(), "feedback_content",
 				feedbackContent);
+		Map<String, Object> stateUpdate = new HashMap<>();
 		if (graphRequest.isRejectedPlan()) {
 			multiTurnContextManager.restartLastTurn(threadId);
+			// A rejected plan starts a new execution attempt. Do not carry source
+			// records discovered by the rejected attempt into the replacement report.
+			stateUpdate.put(DATA_LINEAGE_SOURCES, List.of());
 		}
-		Map<String, Object> stateUpdate = new HashMap<>();
 		stateUpdate.put(HUMAN_FEEDBACK_DATA, feedbackData);
 		stateUpdate.put(MULTI_TURN_CONTEXT, multiTurnContextManager.buildContext(threadId));
 

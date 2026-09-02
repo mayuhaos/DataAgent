@@ -46,7 +46,7 @@ spring:
     vectorstore:
       type: elasticsearch
       elasticsearch:
-        index-name: spring-ai-document-index
+        index-name: nl2sql-document-index
         initialize-schema: true
         dimensions: 1024
         similarity: cosine

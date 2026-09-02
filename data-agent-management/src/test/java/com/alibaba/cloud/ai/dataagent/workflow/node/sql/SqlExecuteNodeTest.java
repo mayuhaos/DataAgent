@@ -40,7 +40,6 @@ import com.alibaba.cloud.ai.dataagent.bo.DbConfigBO;
 import com.alibaba.cloud.ai.dataagent.bo.schema.ResultSetBO;
 import com.alibaba.cloud.ai.dataagent.connector.accessor.Accessor;
 import com.alibaba.cloud.ai.dataagent.service.llm.LlmService;
-import com.alibaba.cloud.ai.dataagent.service.lineage.LineageQueryService;
 import com.alibaba.cloud.ai.dataagent.service.nl2sql.Nl2SqlService;
 import com.alibaba.cloud.ai.dataagent.util.DatabaseUtil;
 import com.alibaba.cloud.ai.dataagent.util.JsonParseUtil;
@@ -95,15 +94,11 @@ class SqlExecuteNodeTest {
 	@Mock
 	private Accessor accessor;
 
-	@Mock
-	private LineageQueryService lineageQueryService;
-
 	private SqlExecuteNode sqlExecuteNode;
 
 	@BeforeEach
 	void setUp() {
-		sqlExecuteNode = new SqlExecuteNode(databaseUtil, nl2SqlService, llmService, properties, jsonParseUtil,
-				lineageQueryService);
+		sqlExecuteNode = new SqlExecuteNode(databaseUtil, nl2SqlService, llmService, properties, jsonParseUtil);
 	}
 
 	private OverAllState createTestState() {
@@ -237,7 +232,7 @@ class SqlExecuteNodeTest {
 		assertEquals(true, completionResult.get(SQL_QUERY_EMPTY));
 		assertFalse(completionResult.containsKey(PLAN_CURRENT_STEP));
 		assertTrue(getStreamedText(responses).contains("当前查询未找到相关数据，请调整查询条件后重试。"));
-		verifyNoInteractions(llmService, lineageQueryService);
+		verifyNoInteractions(llmService);
 	}
 
 	@Test

@@ -45,11 +45,11 @@ class SQLExecutorDispatcherTest {
 	}
 
 	@Test
-	void apply_noRetryReason_routesToPlanExecutor() {
+	void apply_noRetryReason_routesToLineageQuery() {
 		OverAllState state = new OverAllState();
 		state.updateState(Map.of(SQL_REGENERATE_REASON, SqlRetryDto.empty()));
 
-		assertEquals(PLAN_EXECUTOR_NODE, dispatcher.apply(state));
+		assertEquals(LINEAGE_QUERY_NODE, dispatcher.apply(state));
 	}
 
 	@Test
@@ -61,11 +61,11 @@ class SQLExecutorDispatcherTest {
 	}
 
 	@Test
-	void apply_semanticFail_notSqlExecuteFail_routesToPlanExecutor() {
+	void apply_semanticFail_notSqlExecuteFail_routesToLineageQuery() {
 		OverAllState state = new OverAllState();
 		state.updateState(Map.of(SQL_REGENERATE_REASON, SqlRetryDto.semantic("semantic issue")));
 
-		assertEquals(PLAN_EXECUTOR_NODE, dispatcher.apply(state));
+		assertEquals(LINEAGE_QUERY_NODE, dispatcher.apply(state));
 	}
 
 	@Test

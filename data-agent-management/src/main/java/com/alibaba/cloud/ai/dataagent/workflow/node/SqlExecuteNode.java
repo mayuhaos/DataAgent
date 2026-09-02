@@ -16,7 +16,6 @@
 package com.alibaba.cloud.ai.dataagent.workflow.node;
 
 import static com.alibaba.cloud.ai.dataagent.constant.Constant.PLAN_CURRENT_STEP;
-import static com.alibaba.cloud.ai.dataagent.constant.Constant.DATA_LINEAGE_SOURCES;
 import static com.alibaba.cloud.ai.dataagent.constant.Constant.SQL_EXECUTE_NODE_OUTPUT;
 import static com.alibaba.cloud.ai.dataagent.constant.Constant.SQL_GENERATE_COUNT;
 import static com.alibaba.cloud.ai.dataagent.constant.Constant.SQL_GENERATE_OUTPUT;
@@ -38,7 +37,6 @@ import com.alibaba.cloud.ai.dataagent.prompt.PromptHelper;
 import com.alibaba.cloud.ai.dataagent.properties.DataAgentProperties;
 import com.alibaba.cloud.ai.dataagent.service.llm.LlmService;
 import com.alibaba.cloud.ai.dataagent.service.nl2sql.Nl2SqlService;
-import com.alibaba.cloud.ai.dataagent.service.lineage.LineageQueryService;
 import com.alibaba.cloud.ai.dataagent.util.ChatResponseUtil;
 import com.alibaba.cloud.ai.dataagent.util.DatabaseUtil;
 import com.alibaba.cloud.ai.dataagent.util.FluxUtil;
@@ -52,9 +50,7 @@ import com.alibaba.cloud.ai.graph.OverAllState;
 import com.alibaba.cloud.ai.graph.action.NodeAction;
 import com.alibaba.cloud.ai.graph.streaming.StreamingOutput;
 import java.time.Duration;
-import java.util.ArrayList;
 import java.util.HashMap;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -89,8 +85,6 @@ public class SqlExecuteNode implements NodeAction {
 	private final DataAgentProperties properties;
 
 	private final JsonParseUtil jsonParseUtil;
-
-	private final LineageQueryService lineageQueryService;
 
 	private static final int SAMPLE_DATA_NUMBER = 20;
 
@@ -143,7 +137,6 @@ public class SqlExecuteNode implements NodeAction {
 		dbQueryParameter.setSchema(dbConfig.getSchema());
 
 		Accessor dbAccessor = databaseUtil.getAgentAccessor(agentId);
-		Integer datasourceId = databaseUtil.getAgentDatasourceId(agentId);
 		final Map<String, Object> result = new HashMap<>();
 
 		// 先返回流式数据，在执行数据库查询
@@ -192,14 +185,6 @@ public class SqlExecuteNode implements NodeAction {
 				log.info("SQL execution successful, result count: {}",
 						resultSetBO.getData() != null ? resultSetBO.getData().size() : 0);
 
-				if (resultSetBO.getData() != null && !resultSetBO.getData().isEmpty()) {
-					List<Map<String, String>> currentSources = StateUtil.getObjectValue(state, DATA_LINEAGE_SOURCES,
-							List.class, new ArrayList<>());
-					List<Map<String, String>> discoveredSources = lineageQueryService.querySources(datasourceId, dbConfig,
-							dbAccessor, sqlQuery);
-					result.put(DATA_LINEAGE_SOURCES, mergeLineageSources(currentSources, discoveredSources));
-				}
-
 				// 回写最终执行的sql，报告节点需要使用
 				ExecutionStep.ToolParameters currentStepParams = PlanProcessUtil.getCurrentExecutionStep(state)
 					.getToolParameters();
@@ -228,22 +213,6 @@ public class SqlExecuteNode implements NodeAction {
 		Flux<GraphResponse<StreamingOutput>> generator = FluxUtil.createStreamingGeneratorWithMessages(this.getClass(),
 				state, v -> result, displayFlux);
 		return Map.of(SQL_EXECUTE_NODE_OUTPUT, generator);
-	}
-
-	private List<Map<String, String>> mergeLineageSources(List<Map<String, String>> currentSources,
-			List<Map<String, String>> discoveredSources) {
-		Map<String, Map<String, String>> merged = new LinkedHashMap<>();
-		for (Map<String, String> source : Optional.ofNullable(currentSources).orElseGet(List::of)) {
-			merged.put(lineageKey(source), source);
-		}
-		for (Map<String, String> source : Optional.ofNullable(discoveredSources).orElseGet(List::of)) {
-			merged.putIfAbsent(lineageKey(source), source);
-		}
-		return new ArrayList<>(merged.values());
-	}
-
-	private String lineageKey(Map<String, String> source) {
-		return source.getOrDefault("source_file_sha256", "") + "|" + source.getOrDefault("source_sheet", "");
 	}
 
 	/**

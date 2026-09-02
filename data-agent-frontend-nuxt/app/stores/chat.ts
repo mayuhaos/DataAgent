@@ -580,19 +580,25 @@ export const useChatStore = defineStore('chat', () => {
 
 		function applyTimingUpdate(response: GraphNodeResponse) {
 			if (!response.nodeName) return;
-			const block = [...sessionState.nodeBlocks]
-				.reverse()
-				.find((item) => item[0]?.nodeName === response.nodeName);
-			const target = block?.[0];
-			if (!target) return;
-			if (typeof response.workflowStartedAt === 'number')
-				target.workflowStartedAt = response.workflowStartedAt;
-			if (typeof response.nodeStartedAt === 'number')
-				target.nodeStartedAt = response.nodeStartedAt;
-			if (typeof response.nodeElapsedMs === 'number')
-				target.nodeElapsedMs = response.nodeElapsedMs;
-			if (typeof response.totalElapsedMs === 'number')
-				target.totalElapsedMs = response.totalElapsedMs;
+			for (const block of sessionState.nodeBlocks) {
+				for (const target of block) {
+					if (
+						target.nodeName !== response.nodeName ||
+						(typeof response.nodeStartedAt === 'number' &&
+							target.nodeStartedAt !== response.nodeStartedAt)
+					) {
+						continue;
+					}
+					if (typeof response.workflowStartedAt === 'number')
+						target.workflowStartedAt = response.workflowStartedAt;
+					if (typeof response.nodeStartedAt === 'number')
+						target.nodeStartedAt = response.nodeStartedAt;
+					if (typeof response.nodeElapsedMs === 'number')
+						target.nodeElapsedMs = response.nodeElapsedMs;
+					if (typeof response.totalElapsedMs === 'number')
+						target.totalElapsedMs = response.totalElapsedMs;
+				}
+			}
 		}
 
 		let viewSyncTimer: ReturnType<typeof setTimeout> | null = null;

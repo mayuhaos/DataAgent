@@ -77,6 +77,8 @@ public final class Constant {
 
 	public static final String SQL_EXECUTE_NODE_OUTPUT = "SQL_EXECUTE_NODE_OUTPUT";
 
+	public static final String LINEAGE_QUERY_NODE_OUTPUT = "LINEAGE_QUERY_NODE_OUTPUT";
+
 	public static final String SQL_QUERY_EMPTY = "SQL_QUERY_EMPTY";
 
 	public static final String DATA_LINEAGE_SOURCES = "DATA_LINEAGE_SOURCES";
@@ -121,6 +123,8 @@ public final class Constant {
 	public static final String SQL_GENERATE_NODE = "SQL_GENERATE_NODE";
 
 	public static final String SQL_EXECUTE_NODE = "SQL_EXECUTE_NODE";
+
+	public static final String LINEAGE_QUERY_NODE = "LINEAGE_QUERY_NODE";
 
 	public static final String SEMANTIC_CONSISTENCY_NODE = "SEMANTIC_CONSISTENCY_NODE";
 

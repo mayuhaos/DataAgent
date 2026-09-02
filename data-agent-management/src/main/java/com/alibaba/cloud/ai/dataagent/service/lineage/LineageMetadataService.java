@@ -139,7 +139,10 @@ public class LineageMetadataService {
 			return;
 		}
 		TableLineageMetadata parent = detected.get(normalize(parentTable));
-		if (parent == null || !containsTable(columnsByTable, childTable)) {
+		// A generated lineage query can add only one join. Do not flatten a
+		// multi-hop foreign-key path into that join, because the child's foreign
+		// key targets the intermediate table rather than the original source table.
+		if (parent == null || !parent.direct() || !containsTable(columnsByTable, childTable)) {
 			return;
 		}
 		detected.put(normalize(childTable),

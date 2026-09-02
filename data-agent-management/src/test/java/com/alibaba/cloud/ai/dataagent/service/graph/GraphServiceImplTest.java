@@ -47,6 +47,8 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
+import static com.alibaba.cloud.ai.dataagent.constant.Constant.DATA_LINEAGE_SOURCES;
+
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -157,6 +159,28 @@ class GraphServiceImplTest {
 		graphService.graphStreamProcess(sink, request);
 
 		assertEquals("existing-thread", request.getThreadId());
+	}
+
+	@Test
+	void graphStreamProcess_newTurnClearsCheckpointedLineageSources() throws InterruptedException {
+		GraphRequest request = GraphRequest.builder()
+			.agentId("1")
+			.threadId("existing-thread")
+			.query("test query")
+			.build();
+		Sinks.Many<ServerSentEvent<GraphNodeResponse>> sink = Sinks.many().multicast().onBackpressureBuffer();
+		@SuppressWarnings("unchecked")
+		org.mockito.ArgumentCaptor<java.util.Map<String, Object>> stateCaptor = org.mockito.ArgumentCaptor
+			.forClass(java.util.Map.class);
+		when(compiledGraph.stream(stateCaptor.capture(), any(RunnableConfig.class))).thenReturn(Flux.empty());
+
+		graphService.graphStreamProcess(sink, request);
+
+		long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+		while (stateCaptor.getAllValues().isEmpty() && System.nanoTime() < deadline) {
+			Thread.sleep(10);
+		}
+		assertEquals(List.of(), stateCaptor.getValue().get(DATA_LINEAGE_SOURCES));
 	}
 
 	@Test

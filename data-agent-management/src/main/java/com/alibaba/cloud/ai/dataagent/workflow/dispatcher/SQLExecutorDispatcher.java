@@ -42,8 +42,8 @@ public class SQLExecutorDispatcher implements EdgeAction {
 			return END;
 		}
 		else {
-			log.info("SQL运行成功，返回PlanExecutorNode。");
-			return PLAN_EXECUTOR_NODE;
+			log.info("SQL运行成功，开始查询数据来源。");
+			return LINEAGE_QUERY_NODE;
 		}
 	}
 

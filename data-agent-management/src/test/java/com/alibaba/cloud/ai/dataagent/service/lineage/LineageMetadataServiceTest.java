@@ -62,11 +62,14 @@ class LineageMetadataServiceTest {
 		when(datasourceService.getDatasourceById(4)).thenReturn(datasource);
 		when(datasourceService.getDbConfig(datasource)).thenReturn(dbConfig);
 		when(datasourceService.getDatasourceTables(4))
-			.thenReturn(List.of("xlsx_report_lineage", "inspection_report", "dimension_measurement", "plain_table"));
+			.thenReturn(List.of("xlsx_report_lineage", "inspection_report", "inspection_item",
+					"dimension_measurement", "plain_table"));
 		when(datasourceService.getTableColumns(4, "xlsx_report_lineage"))
 			.thenReturn(List.of("id", "source_file_name", "source_file_sha256", "source_sheet", "imported_at"));
 		when(datasourceService.getTableColumns(4, "inspection_report"))
 			.thenReturn(List.of("id", "source_report_id", "title"));
+		when(datasourceService.getTableColumns(4, "inspection_item"))
+			.thenReturn(List.of("id", "inspection_report_id", "item_text"));
 		when(datasourceService.getTableColumns(4, "dimension_measurement"))
 			.thenReturn(List.of("id", "source_report_id", "report_id", "value"));
 		when(datasourceService.getTableColumns(4, "plain_table")).thenReturn(List.of("id", "name"));
@@ -76,6 +79,12 @@ class LineageMetadataServiceTest {
 					.table("inspection_report")
 					.column("source_report_id")
 					.referencedTable("xlsx_report_lineage")
+					.referencedColumn("id")
+					.build(),
+				ForeignKeyInfoBO.builder()
+					.table("inspection_item")
+					.column("inspection_report_id")
+					.referencedTable("inspection_report")
 					.referencedColumn("id")
 					.build(),
 				ForeignKeyInfoBO.builder()
@@ -98,6 +107,7 @@ class LineageMetadataServiceTest {
 		assertEquals("xlsx_report_lineage", measurement.sourceTableName());
 		assertEquals("source_report_id", measurement.localJoinColumn());
 		assertEquals("id", measurement.sourceJoinColumn());
+		assertFalse(metadata.tables().containsKey("inspection_item"));
 	}
 
 	@Test
