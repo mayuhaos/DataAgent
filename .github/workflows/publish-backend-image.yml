@@ -75,6 +75,8 @@ jobs:
           file: docker-file/Dockerfile-backend
           push: true
           platforms: ${{ vars.DOCKER_PLATFORMS || secrets.DOCKER_PLATFORMS || 'linux/amd64' }}
+          provenance: false
+          sbom: false
           tags: |
             ${{ vars.ACR_REGISTRY || secrets.ACR_REGISTRY }}/${{ vars.ACR_NAMESPACE || secrets.ACR_NAMESPACE }}/${{ env.IMAGE_NAME }}:latest
             ${{ vars.ACR_REGISTRY || secrets.ACR_REGISTRY }}/${{ vars.ACR_NAMESPACE || secrets.ACR_NAMESPACE }}/${{ env.IMAGE_NAME }}:sha-${{ github.sha }}
