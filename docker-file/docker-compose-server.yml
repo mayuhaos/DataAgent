@@ -6,6 +6,8 @@ services:
     restart: unless-stopped
     depends_on:
       - elasticsearch
+    security_opt:
+      - seccomp=unconfined
     ports:
       - "8065:8065"
     volumes:
