@@ -57,3 +57,16 @@ DATA_AGENT_BACKEND_IMAGE=registry.cn-hangzhou.aliyuncs.com/your-namespace/data-a
 ```
 
 脚本会拉取镜像、启动所需 Compose 依赖，并且只重建 `backend` 容器。生产环境建议使用 `sha-<Git commit SHA>` 标签替代 `latest`，这样每次发布都能精确回滚。
+
+### 仅使用镜像的服务器 Compose
+
+如果服务器只需要运行后端镜像，可直接使用 `docker-file/docker-compose-server.yml`。该文件不会执行构建，并将服务器上的 `/home/data/app/nl2sql-agent/application.yml` 只读挂载到容器：
+
+```bash
+cd /home/data/app/nl2sql-agent
+export DATA_AGENT_BACKEND_IMAGE=registry.cn-shanghai.aliyuncs.com/mars-cn/data-agent-backend:latest
+docker compose -f docker-compose-server.yml pull
+docker compose -f docker-compose-server.yml up -d
+```
+
+将 `docker-compose-server.yml` 放在 `/home/data/app/nl2sql-agent`，并确保同目录存在 `application.yml`。不同服务器只需替换各自的 YAML 文件和 `DATA_AGENT_BACKEND_IMAGE`。
