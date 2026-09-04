@@ -29,7 +29,7 @@ ACR 是容器镜像仓库，不直接部署 JAR。本仓库的发布链路是：
 
 后端的 Docker Python 执行器需要访问 Docker 守护进程。若要给后端容器挂载 Docker Socket，先根据生产隔离方案评估其对宿主机的访问权限。
 
-数据库密码、模型 API Key 和 ACR 凭证等运行时密钥应保存在服务器环境变量或 `/opt/dataagent/docker-file/config/application.yml`，不要提交到 Git。Compose 会将此文件以只读方式挂载到容器的 `/app/config/application.yml`；该文件会覆盖 JAR 内置的默认 `application.yml`，修改后重新执行部署脚本即可生效。
+数据库密码、模型 API Key 和 ACR 凭证等运行时密钥应保存在服务器环境变量或 YAML 文件中，不要提交到 Git。部署脚本会将 `DATA_AGENT_CONFIG_FILE` 指向的文件以只读方式挂载到容器的 `/app/config/application.yml`；该文件会覆盖 JAR 内置的默认 `application.yml`，修改后重新执行部署脚本即可生效。未指定时，默认读取 `/opt/dataagent/docker-file/config/application.yml`。
 
 ## 通过 SSH 部署
 
@@ -44,6 +44,14 @@ docker login registry.cn-hangzhou.aliyuncs.com
 ```bash
 cd /opt/dataagent/docker-file
 chmod +x deploy-backend.sh
+DATA_AGENT_BACKEND_IMAGE=registry.cn-hangzhou.aliyuncs.com/your-namespace/data-agent-backend:latest \
+  ./deploy-backend.sh
+```
+
+不同服务器可指定各自的配置文件，镜像保持不变：
+
+```bash
+DATA_AGENT_CONFIG_FILE=/etc/dataagent/production.yml \
 DATA_AGENT_BACKEND_IMAGE=registry.cn-hangzhou.aliyuncs.com/your-namespace/data-agent-backend:latest \
   ./deploy-backend.sh
 ```
