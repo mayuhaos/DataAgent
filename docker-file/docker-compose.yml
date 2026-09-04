@@ -48,6 +48,8 @@ services:
       - AI_DASHSCOPE_API_KEY=${AI_DASHSCOPE_API_KEY}
     ports:
       - "8065:8065"
+    volumes:
+      - ./config/application.yml:/app/config/application.yml:ro
     depends_on:
       mysql:
         condition: service_healthy

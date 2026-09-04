@@ -29,7 +29,7 @@ ACR 是容器镜像仓库，不直接部署 JAR。本仓库的发布链路是：
 
 后端的 Docker Python 执行器需要访问 Docker 守护进程。若要给后端容器挂载 Docker Socket，先根据生产隔离方案评估其对宿主机的访问权限。
 
-数据库密码、模型 API Key 和 ACR 凭证等运行时密钥应保存在服务器环境变量或 `/opt/dataagent/docker-file/config/application.yml`，不要提交到 Git。
+数据库密码、模型 API Key 和 ACR 凭证等运行时密钥应保存在服务器环境变量或 `/opt/dataagent/docker-file/config/application.yml`，不要提交到 Git。Compose 会将此文件以只读方式挂载到容器的 `/app/config/application.yml`；该文件会覆盖 JAR 内置的默认 `application.yml`，修改后重新执行部署脚本即可生效。
 
 ## 通过 SSH 部署
 
