@@ -383,11 +383,6 @@
             <url>https://repo.spring.io/milestone</url>
         </repository>
         <repository>
-            <id>aliyun-releases</id>
-            <name>Aliyun Releases</name>
-            <url>https://maven.aliyun.com/nexus/content/repositories/releases</url>
-        </repository>
-        <repository>
             <id>maven-central</id>
             <name>Maven Central</name>
             <url>https://repo1.maven.org/maven2</url>
