@@ -11,8 +11,12 @@ if ! command -v docker >/dev/null 2>&1; then
   exit 1
 fi
 
-if ! docker compose version >/dev/null 2>&1; then
-  echo "错误：未安装 Docker Compose Plugin。" >&2
+if docker compose version >/dev/null 2>&1; then
+  COMPOSE_COMMAND=(docker compose)
+elif command -v docker-compose >/dev/null 2>&1; then
+  COMPOSE_COMMAND=(docker-compose)
+else
+  echo "错误：未安装 Docker Compose（docker compose 或 docker-compose）。" >&2
   exit 1
 fi
 
@@ -22,7 +26,7 @@ if [[ ! -f "$COMPOSE_FILE" ]]; then
 fi
 
 compose() {
-  docker compose --project-directory "$SCRIPT_DIR" -f "$COMPOSE_FILE" "$@"
+  "${COMPOSE_COMMAND[@]}" --project-directory "$SCRIPT_DIR" -f "$COMPOSE_FILE" "$@"
 }
 
 start_service() {
