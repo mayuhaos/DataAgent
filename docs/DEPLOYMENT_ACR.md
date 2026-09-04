@@ -69,4 +69,4 @@ docker compose -f docker-compose-server.yml pull
 docker compose -f docker-compose-server.yml up -d
 ```
 
-将 `docker-compose-server.yml` 放在 `/home/data/app/nl2sql-agent`，并确保同目录存在 `application.yml`。不同服务器只需替换各自的 YAML 文件和 `DATA_AGENT_BACKEND_IMAGE`。
+将 `docker-compose-server.yml` 放在 `/home/data/app/nl2sql-agent`，并确保同目录存在 `application.yml`。应用密钥直接配置在这个 YAML 中，不需要写入 Compose。不同服务器只需替换各自的 YAML 文件和 `DATA_AGENT_BACKEND_IMAGE`。
