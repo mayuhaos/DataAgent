@@ -33,6 +33,7 @@ services:
 
   # 后端服务
   backend:
+    image: ${DATA_AGENT_BACKEND_IMAGE:-saa-data-agent-backend:1.0.0-SNAPSHOT}
     build:
       context: ..
       dockerfile: ./docker-file/Dockerfile-backend

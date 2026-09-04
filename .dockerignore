@@ -1,0 +1,11 @@
+.git
+.github
+.idea
+CI
+docs
+img
+target
+data-agent-frontend-nuxt
+data-agent-user-frontend-nuxt
+data-agent-management/target/*
+!data-agent-management/target/*.jar
