@@ -4,7 +4,37 @@ services:
     image: ${DATA_AGENT_BACKEND_IMAGE:-crpi-pfb8feztxepgiqmf.cn-shanghai.personal.cr.aliyuncs.com/mars-cn/data-agent-backend:latest}
     container_name: data-agent-backend
     restart: unless-stopped
+    depends_on:
+      - elasticsearch
     ports:
       - "8065:8065"
     volumes:
       - /home/data/app/nl2sql-agent/application.yml:/app/config/application.yml:ro
+    networks:
+      - normal-network
+
+  elasticsearch:
+    image: elasticsearch:8.18.6
+    container_name: elasticsearch
+    restart: unless-stopped
+    ports:
+      - "9200:9200"
+    environment:
+      ES_JAVA_OPTS: "-Xms512m -Xmx512m"
+      discovery.type: "single-node"
+      xpack.security.enabled: "false"
+    networks:
+      - normal-network
+    security_opt:
+      - seccomp=unconfined
+    mem_limit: 1g
+    memswap_limit: 2g
+    ulimits:
+      nofile:
+        soft: 65535
+        hard: 65535
+
+networks:
+  normal-network:
+    external: true
+    name: normal-network
