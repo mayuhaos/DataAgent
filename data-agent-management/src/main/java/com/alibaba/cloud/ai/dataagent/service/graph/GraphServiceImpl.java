@@ -16,6 +16,7 @@
 package com.alibaba.cloud.ai.dataagent.service.graph;
 
 import com.alibaba.cloud.ai.dataagent.dto.GraphRequest;
+import com.alibaba.cloud.ai.dataagent.entity.ChatMessage;
 import com.alibaba.cloud.ai.dataagent.enums.ReasoningEffort;
 import com.alibaba.cloud.ai.dataagent.enums.TextType;
 import com.alibaba.cloud.ai.dataagent.service.graph.Context.ClarificationContextManager;
@@ -23,6 +24,9 @@ import com.alibaba.cloud.ai.dataagent.service.graph.Context.ClarificationContext
 import com.alibaba.cloud.ai.dataagent.service.graph.Context.MultiTurnContextManager;
 import com.alibaba.cloud.ai.dataagent.service.graph.Context.StreamContext;
 import com.alibaba.cloud.ai.dataagent.service.langfuse.LangfuseService;
+import com.alibaba.cloud.ai.dataagent.service.chat.ChatMessageService;
+import com.alibaba.cloud.ai.dataagent.service.chat.ChatSessionService;
+import com.alibaba.cloud.ai.dataagent.util.JsonUtil;
 import com.alibaba.cloud.ai.dataagent.vo.GraphNodeResponse;
 import com.alibaba.cloud.ai.dataagent.workflow.node.ClarificationNode;
 import com.alibaba.cloud.ai.dataagent.workflow.node.PlannerNode;
@@ -98,14 +102,21 @@ public class GraphServiceImpl implements GraphService {
 
 	private final LangfuseService langfuseReporter;
 
+	private final ChatMessageService chatMessageService;
+
+	private final ChatSessionService chatSessionService;
+
 	public GraphServiceImpl(StateGraph stateGraph, ExecutorService executorService,
 			MultiTurnContextManager multiTurnContextManager, ClarificationContextManager clarificationContextManager,
-			LangfuseService langfuseReporter) throws GraphStateException {
+			LangfuseService langfuseReporter, ChatMessageService chatMessageService,
+			ChatSessionService chatSessionService) throws GraphStateException {
 		this.compiledGraph = stateGraph.compile(CompileConfig.builder().interruptBefore(HUMAN_FEEDBACK_NODE).build());
 		this.executor = executorService;
 		this.multiTurnContextManager = multiTurnContextManager;
 		this.clarificationContextManager = clarificationContextManager;
 		this.langfuseReporter = langfuseReporter;
+		this.chatMessageService = chatMessageService;
+		this.chatSessionService = chatSessionService;
 	}
 
 	@Override
@@ -245,9 +256,10 @@ public class GraphServiceImpl implements GraphService {
 			throw new IllegalStateException("澄清后的查询为空，请重新描述完整问题");
 		}
 
-		GraphRequest resumedRequest = GraphRequest.builder()
-			.agentId(graphRequest.getAgentId())
-			.threadId(threadId)
+			GraphRequest resumedRequest = GraphRequest.builder()
+				.agentId(graphRequest.getAgentId())
+				.conversationId(graphRequest.getConversationId())
+				.threadId(threadId)
 			.query(refinedQuery)
 			.humanFeedback(graphRequest.isHumanFeedback())
 			.humanFeedbackContent(graphRequest.getHumanFeedbackContent())
@@ -423,6 +435,38 @@ public class GraphServiceImpl implements GraphService {
 		}
 	}
 
+	/** Persist the server-owned execution trace so API clients do not have to save SSE data. */
+	private void persistTimeline(StreamContext context) {
+		String sessionId = context.getConversationId();
+		if (!StringUtils.hasText(sessionId) || chatSessionService.findBySessionId(sessionId) == null
+				|| context.getReplayResponsesAfter(0).isEmpty()) {
+			return;
+		}
+		try {
+			List<List<GraphNodeResponse>> blocks = new java.util.ArrayList<>();
+			List<GraphNodeResponse> current = null;
+			for (GraphNodeResponse response : context.getReplayResponsesAfter(0)) {
+				if (response.isTimingOnly() || response.getEventType() != com.alibaba.cloud.ai.dataagent.enums.GraphEventType.NODE_OUTPUT
+						|| !StringUtils.hasText(response.getText())) {
+					continue;
+				}
+				if (current == null || !java.util.Objects.equals(response.getNodeName(), current.get(0).getNodeName())) {
+					current = new java.util.ArrayList<>();
+					blocks.add(current);
+				}
+				current.add(response);
+			}
+			if (blocks.isEmpty()) {
+				return;
+			}
+			chatMessageService.saveMessage(ChatMessage.builder().sessionId(sessionId).role("assistant")
+					.messageType("timeline").content(JsonUtil.getObjectMapper().writeValueAsString(blocks)).build());
+		}
+		catch (Exception ex) {
+			log.warn("Failed to persist execution timeline for session {}", sessionId, ex);
+		}
+	}
+
 	private void handleStreamComplete(String agentId, String threadId) {
 		log.info("Stream processing completed successfully for threadId: {}", threadId);
 		multiTurnContextManager.finishTurn(threadId);
@@ -431,9 +475,10 @@ public class GraphServiceImpl implements GraphService {
 		}
 
 		StreamContext context = streamContextMap.remove(threadId);
-		if (context != null && !context.isCleaned()) {
-			long now = System.currentTimeMillis();
-			emitFinalNodeTiming(context, agentId, threadId, now);
+			if (context != null && !context.isCleaned()) {
+				long now = System.currentTimeMillis();
+				emitFinalNodeTiming(context, agentId, threadId, now);
+				persistTimeline(context);
 			if (context.getSpan() != null) {
 				langfuseReporter.endSpanSuccess(context.getSpan(), threadId, context.getCollectedOutput());
 			}

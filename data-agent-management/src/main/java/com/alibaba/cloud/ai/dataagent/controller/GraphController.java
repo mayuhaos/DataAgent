@@ -60,6 +60,7 @@ public class GraphController {
 			@RequestParam(value = "nl2sqlOnly", required = false) boolean nl2sqlOnly,
 			@RequestParam(value = "thinkingEnabled", required = false) Boolean thinkingEnabled,
 			@RequestParam(value = "reasoningEffort", required = false) String reasoningEffort,
+			@RequestParam(value = "sessionId", required = false) String sessionId,
 			ServerHttpResponse response) {
 		// Set SSE-related HTTP headers
 		response.getHeaders().add("Cache-Control", "no-cache");
@@ -70,6 +71,7 @@ public class GraphController {
 
 		GraphRequest request = GraphRequest.builder()
 			.agentId(agentId)
+			.conversationId(sessionId)
 			.threadId(threadId)
 			.query(query)
 			.humanFeedback(humanFeedback)
