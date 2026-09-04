@@ -64,9 +64,20 @@ DATA_AGENT_BACKEND_IMAGE=registry.cn-hangzhou.aliyuncs.com/your-namespace/data-a
 
 ```bash
 cd /home/data/app/nl2sql-agent
-export DATA_AGENT_BACKEND_IMAGE=registry.cn-shanghai.aliyuncs.com/mars-cn/data-agent-backend:latest
 docker compose -f docker-compose-server.yml pull
 docker compose -f docker-compose-server.yml up -d
 ```
 
+Compose 默认使用当前 ACR 的 `latest` 镜像。需要固定版本时，可在执行命令前设置 `DATA_AGENT_BACKEND_IMAGE` 为对应的 `sha-*` 标签。
+
 将 `docker-compose-server.yml` 放在 `/home/data/app/nl2sql-agent`，并确保同目录存在 `application.yml`。应用密钥直接配置在这个 YAML 中，不需要写入 Compose。不同服务器只需替换各自的 YAML 文件和 `DATA_AGENT_BACKEND_IMAGE`。
+
+服务器也可以使用交互式管理脚本：
+
+```bash
+cd /home/data/app/nl2sql-agent
+chmod +x manage-server.sh
+./manage-server.sh
+```
+
+脚本提供启动、停止、重启、拉取最新镜像并部署、查看实时日志五项操作。查看日志时按 `Ctrl+C` 返回终端，再重新运行脚本即可。

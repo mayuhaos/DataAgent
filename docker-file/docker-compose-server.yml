@@ -1,7 +1,7 @@
 # 服务器部署专用：只拉取镜像，不在服务器执行 Maven 或 Docker build。
 services:
   data-agent-backend:
-    image: registry.cn-shanghai.aliyuncs.com/mars-cn/data-agent-backend:latest
+    image: ${DATA_AGENT_BACKEND_IMAGE:-crpi-pfb8feztxepgiqmf.cn-shanghai.personal.cr.aliyuncs.com/mars-cn/data-agent-backend:latest}
     container_name: data-agent-backend
     restart: unless-stopped
     ports:
