@@ -19,8 +19,11 @@ import com.alibaba.cloud.ai.dataagent.enums.TextType;
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.model.Generation;
+import reactor.core.publisher.Flux;
+import reactor.core.publisher.Mono;
 
 import java.util.List;
+import java.util.Locale;
 
 /**
  * @author zhangshenghang
@@ -53,6 +56,102 @@ public class ChatResponseUtil {
 			return "";
 		}
 		return output.getText() == null ? "" : output.getText();
+	}
+
+	/**
+	 * Removes reasoning emitted inline as {@code <think>...</think>} while preserving
+	 * response and generation metadata. The filter keeps state across chunks because
+	 * model providers may split the tags between SSE events.
+	 */
+	public static Flux<ChatResponse> hideThinkingProcess(Flux<ChatResponse> responseFlux) {
+		return Flux.defer(() -> {
+			ThinkingProcessFilter filter = new ThinkingProcessFilter();
+			Flux<ChatResponse> filtered = responseFlux.map(response -> replaceText(response,
+					filter.filter(getText(response))));
+			return filtered.concatWith(Mono.defer(() -> {
+				String remaining = filter.finish();
+				return remaining.isEmpty() ? Mono.empty() : Mono.just(createPureResponse(remaining));
+			}));
+		});
+	}
+
+	private static ChatResponse replaceText(ChatResponse response, String text) {
+		Generation result = response.getResult();
+		if (result == null || result.getOutput() == null) {
+			return response;
+		}
+
+		AssistantMessage output = result.getOutput();
+		AssistantMessage filteredOutput = AssistantMessage.builder()
+			.content(text)
+			.properties(output.getMetadata())
+			.toolCalls(output.getToolCalls())
+			.media(output.getMedia())
+			.build();
+		Generation filteredGeneration = new Generation(filteredOutput, result.getMetadata());
+		return new ChatResponse(List.of(filteredGeneration), response.getMetadata());
+	}
+
+	private static final class ThinkingProcessFilter {
+
+		private static final String START_TAG = "<think>";
+
+		private static final String END_TAG = "</think>";
+
+		private final StringBuilder pending = new StringBuilder();
+
+		private boolean thinking;
+
+		String filter(String chunk) {
+			if (chunk != null) {
+				pending.append(chunk);
+			}
+
+			StringBuilder visible = new StringBuilder();
+			while (!pending.isEmpty()) {
+				String tag = thinking ? END_TAG : START_TAG;
+				String buffered = pending.toString();
+				int tagIndex = buffered.toLowerCase(Locale.ROOT).indexOf(tag);
+				if (tagIndex >= 0) {
+					if (!thinking) {
+						visible.append(buffered, 0, tagIndex);
+					}
+					pending.delete(0, tagIndex + tag.length());
+					thinking = !thinking;
+					continue;
+				}
+
+				int retained = partialTagLength(buffered, tag);
+				int consumable = buffered.length() - retained;
+				if (!thinking) {
+					visible.append(buffered, 0, consumable);
+				}
+				pending.delete(0, consumable);
+				break;
+			}
+			return visible.toString();
+		}
+
+		String finish() {
+			if (thinking) {
+				pending.setLength(0);
+				return "";
+			}
+			String remaining = pending.toString();
+			pending.setLength(0);
+			return remaining;
+		}
+
+		private int partialTagLength(String value, String tag) {
+			String lowerValue = value.toLowerCase(Locale.ROOT);
+			for (int length = Math.min(value.length(), tag.length() - 1); length > 0; length--) {
+				if (tag.startsWith(lowerValue.substring(value.length() - length))) {
+					return length;
+				}
+			}
+			return 0;
+		}
+
 	}
 
 }

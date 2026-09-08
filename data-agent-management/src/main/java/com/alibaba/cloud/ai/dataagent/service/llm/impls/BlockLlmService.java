@@ -24,6 +24,8 @@ import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Schedulers;
 
+import static com.alibaba.cloud.ai.dataagent.util.ChatResponseUtil.hideThinkingProcess;
+
 @AllArgsConstructor
 public class BlockLlmService implements LlmService {
 
@@ -31,9 +33,9 @@ public class BlockLlmService implements LlmService {
 
 	@Override
 	public Flux<ChatResponse> call(String system, String user) {
-		return Mono
+		return hideThinkingProcess(Mono
 			.fromCallable(() -> registry.getChatClient().prompt().system(system).user(user).call().chatResponse())
-			.flux();
+			.flux());
 	}
 
 	@Override
@@ -42,7 +44,7 @@ public class BlockLlmService implements LlmService {
 			.outputType(outputType)
 			.maxRepeatAttempts(2)
 			.build();
-		return Mono
+		return hideThinkingProcess(Mono
 			.fromCallable(() -> registry.getChatClient()
 				.prompt()
 				.system(system)
@@ -51,17 +53,19 @@ public class BlockLlmService implements LlmService {
 				.call()
 				.chatResponse())
 			.subscribeOn(Schedulers.boundedElastic())
-			.flux();
+			.flux());
 	}
 
 	@Override
 	public Flux<ChatResponse> callSystem(String system) {
-		return Mono.fromCallable(() -> registry.getChatClient().prompt().system(system).call().chatResponse()).flux();
+		return hideThinkingProcess(
+				Mono.fromCallable(() -> registry.getChatClient().prompt().system(system).call().chatResponse()).flux());
 	}
 
 	@Override
 	public Flux<ChatResponse> callUser(String user) {
-		return Mono.fromCallable(() -> registry.getChatClient().prompt().user(user).call().chatResponse()).flux();
+		return hideThinkingProcess(
+				Mono.fromCallable(() -> registry.getChatClient().prompt().user(user).call().chatResponse()).flux());
 	}
 
 	@Override
@@ -70,9 +74,9 @@ public class BlockLlmService implements LlmService {
 			.outputType(outputType)
 			.maxRepeatAttempts(2)
 			.build();
-		return Mono
+		return hideThinkingProcess(Mono
 			.fromCallable(() -> registry.getChatClient().prompt().user(user).advisors(advisor).call().chatResponse())
-			.flux();
+			.flux());
 	}
 
 }

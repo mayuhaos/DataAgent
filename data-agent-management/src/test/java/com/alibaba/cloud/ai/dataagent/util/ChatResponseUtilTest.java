@@ -17,6 +17,8 @@ package com.alibaba.cloud.ai.dataagent.util;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.ai.chat.model.ChatResponse;
+import reactor.core.publisher.Flux;
+import reactor.test.StepVerifier;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -47,6 +49,38 @@ class ChatResponseUtilTest {
 	void getText_validResponse_returnsText() {
 		ChatResponse response = ChatResponseUtil.createPureResponse("test message");
 		assertEquals("test message", ChatResponseUtil.getText(response));
+	}
+
+	@Test
+	void hideThinkingProcess_removesReasoningAcrossChunks() {
+		Flux<ChatResponse> responses = Flux.just(create("<thi"), create("nk>internal"), create(" reasoning</th"),
+				create("ink>Final answer"));
+
+		StepVerifier.create(ChatResponseUtil.hideThinkingProcess(responses).map(ChatResponseUtil::getText))
+			.expectNext("", "", "", "Final answer")
+			.verifyComplete();
+	}
+
+	@Test
+	void hideThinkingProcess_preservesVisibleTextAroundReasoning() {
+		Flux<ChatResponse> responses = Flux.just(create("Prefix <think>hidden</think> suffix"));
+
+		StepVerifier.create(ChatResponseUtil.hideThinkingProcess(responses).map(ChatResponseUtil::getText))
+			.expectNext("Prefix  suffix")
+			.verifyComplete();
+	}
+
+	@Test
+	void hideThinkingProcess_keepsOrdinaryTextContainingPartialTagPrefix() {
+		Flux<ChatResponse> responses = Flux.just(create("answer <thi"));
+
+		StepVerifier.create(ChatResponseUtil.hideThinkingProcess(responses).map(ChatResponseUtil::getText))
+			.expectNext("answer ", "<thi")
+			.verifyComplete();
+	}
+
+	private ChatResponse create(String text) {
+		return ChatResponseUtil.createPureResponse(text);
 	}
 
 }
