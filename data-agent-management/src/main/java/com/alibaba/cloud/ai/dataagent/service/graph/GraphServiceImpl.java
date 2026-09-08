@@ -45,14 +45,17 @@ import org.springframework.http.codec.ServerSentEvent;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 import reactor.core.Disposable;
+import reactor.core.Exceptions;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Sinks;
+import reactor.util.retry.Retry;
 
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
+import java.time.Duration;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
@@ -87,6 +90,10 @@ public class GraphServiceImpl implements GraphService {
 	private static final String RESUME_MODE_CLARIFICATION = "clarification";
 
 	private static final long RECONNECT_GRACE_PERIOD_SECONDS = 45;
+
+	private static final int MAX_MODEL_RETRIES = 6;
+
+	private static final Duration MODEL_RETRY_DELAY = Duration.ofSeconds(1);
 
 	private final CompiledGraph compiledGraph;
 
@@ -393,7 +400,11 @@ public class GraphServiceImpl implements GraphService {
 				log.debug("StreamContext cleaned before subscription for threadId: {}", threadId);
 				return;
 			}
-			Disposable disposable = nodeOutputFlux.subscribe(output -> handleNodeOutput(graphRequest, output),
+			Flux<NodeOutput> retryingFlux = nodeOutputFlux
+				.retryWhen(Retry.fixedDelay(MAX_MODEL_RETRIES, MODEL_RETRY_DELAY)
+					.doBeforeRetry(signal -> emitRetryStatus(context, agentId, threadId,
+							(int) signal.totalRetries() + 1, signal.failure())));
+			Disposable disposable = retryingFlux.subscribe(output -> handleNodeOutput(graphRequest, output),
 					error -> handleStreamError(agentId, threadId, error),
 					() -> handleStreamComplete(agentId, threadId));
 			synchronized (context) {
@@ -409,19 +420,48 @@ public class GraphServiceImpl implements GraphService {
 		}, executor);
 	}
 
+	private void emitRetryStatus(StreamContext context, String agentId, String threadId, int retryCount,
+			Throwable failure) {
+		if (context.isCleaned()) {
+			return;
+		}
+		// A retry starts a fresh model response; do not let the previous response's
+		// text marker (for example JSON or SQL) affect chunk classification.
+		context.setTextType(null);
+		String errorMessage = failure != null && StringUtils.hasText(failure.getMessage()) ? failure.getMessage()
+				: "模型调用失败";
+		GraphNodeResponse response = GraphNodeResponse.builder()
+				.agentId(agentId)
+				.threadId(threadId)
+				.text("模型调用失败，正在进行第 " + retryCount + " 次重试（共 6 次）\n错误：" + errorMessage)
+				.textType(TextType.TEXT)
+				.error(true)
+				.retrying(true)
+				.retryCount(retryCount)
+				.errorMessage(errorMessage)
+				.sequence(context.nextSequence())
+				.workflowStartedAt(context.getWorkflowStartedAt())
+				.totalElapsedMs(System.currentTimeMillis() - context.getWorkflowStartedAt())
+				.build();
+		emitDataResponse(context, response);
+	}
+
 	private void handleStreamError(String agentId, String threadId, Throwable error) {
 		log.error("Error in stream processing for threadId: {}: ", threadId, error);
+		Throwable rootError = Exceptions.unwrap(error);
+		String errorMessage = StringUtils.hasText(rootError.getMessage()) ? rootError.getMessage()
+				: (StringUtils.hasText(error.getMessage()) ? error.getMessage() : "模型调用失败");
 		StreamContext context = streamContextMap.remove(threadId);
 		if (context != null && !context.isCleaned()) {
 			long now = System.currentTimeMillis();
 			emitFinalNodeTiming(context, agentId, threadId, now);
 			if (context.getSpan() != null) {
 				langfuseReporter.endSpanError(context.getSpan(), threadId,
-						error instanceof Exception ? (Exception) error : new RuntimeException(error));
+						rootError instanceof Exception ? (Exception) rootError : new RuntimeException(rootError));
 			}
 			if (context.getSink() != null && context.getSink().currentSubscriberCount() > 0) {
 				GraphNodeResponse errorResponse = GraphNodeResponse.error(agentId, threadId,
-						"Error in stream processing: " + error.getMessage());
+						"模型调用失败（已重试 6 次）：" + errorMessage);
 				errorResponse.setWorkflowStartedAt(context.getWorkflowStartedAt());
 				errorResponse.setTotalElapsedMs(now - context.getWorkflowStartedAt());
 				context.getSink()

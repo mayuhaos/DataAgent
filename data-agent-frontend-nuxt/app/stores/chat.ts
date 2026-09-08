@@ -655,6 +655,17 @@ export const useChatStore = defineStore('chat', () => {
 		const closeStream = await graphService.streamSearch(
 			request,
 			async (response: GraphNodeResponse) => {
+				if (response.retrying) {
+					if (currentSession.value?.id === sessionId) {
+						appendTransientAssistantMessage(
+							sessionId,
+							'warning',
+							response.text ||
+								`模型调用失败，正在进行第 ${response.retryCount || 0} 次重试。`,
+						);
+					}
+					return;
+				}
 				if (response.error) return;
 				sessionState.threadId = response.threadId || sessionState.threadId;
 				if (typeof response.sequence === 'number') {

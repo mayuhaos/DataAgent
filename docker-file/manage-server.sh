@@ -7,7 +7,7 @@ COMPOSE_FILE="${COMPOSE_FILE:-$SCRIPT_DIR/docker-compose-server.yml}"
 SERVICE_NAME="data-agent-backend"
 
 if ! command -v docker >/dev/null 2>&1; then
-  echo "错误：未安装 Docker。" >&2
+  echo "错误：未安装 Docker。" >&2平时au
   exit 1
 fi
 

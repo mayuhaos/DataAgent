@@ -52,6 +52,9 @@ export interface GraphNodeResponse {
 	awaitingInput?: boolean;
 	error: boolean;
 	complete: boolean;
+	retrying?: boolean;
+	retryCount?: number;
+	errorMessage?: string;
 }
 
 export enum TextType {
@@ -121,6 +124,23 @@ class GraphService {
 				}
 			}
 		};
+
+		// The backend sends terminal failures as a named SSE event. Handle it
+		// separately from EventSource's connection-level onerror callback so the
+		// server-provided error message is not lost.
+		eventSource.addEventListener('error', async (event) => {
+			if (isCompleted || isFailed || isClosedIntentionally) return;
+			if (!(event instanceof MessageEvent) || !event.data) return;
+			isFailed = true;
+			eventSource.close();
+			try {
+				const response = JSON.parse(event.data) as GraphNodeResponse;
+				if (onError)
+					await onError(new Error(response.text || 'Stream processing failed'));
+			} catch {
+				if (onError) await onError(new Error('Stream processing failed'));
+			}
+		});
 
 		eventSource.onerror = async (errorEvent) => {
 			if (isCompleted || isFailed || isClosedIntentionally) {

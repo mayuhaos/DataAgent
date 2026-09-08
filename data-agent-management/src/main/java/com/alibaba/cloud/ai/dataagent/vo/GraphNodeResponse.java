@@ -39,6 +39,16 @@ public class GraphNodeResponse {
 
 	private Integer attempt;
 
+	/** Indicates that the graph execution is being retried after a model error. */
+	@Builder.Default
+	private boolean retrying = false;
+
+	/** One-based retry number, available when {@link #retrying} is true. */
+	private Integer retryCount;
+
+	/** Original error message associated with a retry notification. */
+	private String errorMessage;
+
 	// 使用Constant常量
 	private String nodeName;
 
