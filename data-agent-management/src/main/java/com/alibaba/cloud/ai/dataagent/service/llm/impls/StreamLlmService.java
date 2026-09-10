@@ -33,6 +33,7 @@ import java.util.Map;
 
 import static com.alibaba.cloud.ai.dataagent.constant.Constant.REASONING_EFFORT;
 import static com.alibaba.cloud.ai.dataagent.constant.Constant.THINKING_ENABLED;
+import static com.alibaba.cloud.ai.dataagent.util.ChatResponseUtil.hideThinkingProcess;
 
 @AllArgsConstructor
 public class StreamLlmService implements LlmService {
@@ -41,7 +42,7 @@ public class StreamLlmService implements LlmService {
 
 	@Override
 	public Flux<ChatResponse> call(String system, String user) {
-		return registry.getChatClient().prompt().system(system).user(user).stream().chatResponse();
+		return hideThinkingProcess(registry.getChatClient().prompt().system(system).user(user).stream().chatResponse());
 	}
 
 	@Override
@@ -50,7 +51,7 @@ public class StreamLlmService implements LlmService {
 			.outputType(outputType)
 			.maxRepeatAttempts(2)
 			.build();
-		return Mono.fromCallable(() -> registry.getChatClient()
+		return hideThinkingProcess(Mono.fromCallable(() -> registry.getChatClient()
 			.prompt()
 			.system(system)
 			.user(user)
@@ -58,17 +59,17 @@ public class StreamLlmService implements LlmService {
 			.call()
 			.chatResponse())
 			.subscribeOn(Schedulers.boundedElastic())
-			.flux();
+			.flux());
 	}
 
 	@Override
 	public Flux<ChatResponse> callSystem(String system) {
-		return registry.getChatClient().prompt().system(system).stream().chatResponse();
+		return hideThinkingProcess(registry.getChatClient().prompt().system(system).stream().chatResponse());
 	}
 
 	@Override
 	public Flux<ChatResponse> callUser(String user) {
-		return registry.getChatClient().prompt().user(user).stream().chatResponse();
+		return hideThinkingProcess(registry.getChatClient().prompt().user(user).stream().chatResponse());
 	}
 
 	@Override
@@ -77,30 +78,62 @@ public class StreamLlmService implements LlmService {
 			.outputType(outputType)
 			.maxRepeatAttempts(2)
 			.build();
-		return Mono
+		return hideThinkingProcess(Mono
 			.fromCallable(() -> registry.getChatClient().prompt().user(user).advisors(advisor).call().chatResponse())
 			.subscribeOn(Schedulers.boundedElastic())
-			.flux();
+			.flux());
 	}
 
 	@Override
 	public Flux<ChatResponse> callWithState(String system, String user, OverAllState state) {
-		return applyThinkingOptions(registry.getChatClient().prompt(), state).system(system).user(user).stream().chatResponse();
+		return callWithState(system, user, state, null);
+	}
+
+	@Override
+	public Flux<ChatResponse> callWithState(String system, String user, OverAllState state, boolean thinkingEnabled) {
+		return callWithState(system, user, state, Boolean.valueOf(thinkingEnabled));
+	}
+
+	private Flux<ChatResponse> callWithState(String system, String user, OverAllState state, Boolean thinkingOverride) {
+		return hideThinkingProcess(applyThinkingOptions(registry.getChatClient().prompt(), state, thinkingOverride)
+			.system(system)
+			.user(user)
+			.stream()
+			.chatResponse());
 	}
 
 	@Override
 	public Flux<ChatResponse> callSystemWithState(String system, OverAllState state) {
-		return applyThinkingOptions(registry.getChatClient().prompt(), state).system(system).stream().chatResponse();
+		return hideThinkingProcess(
+				applyThinkingOptions(registry.getChatClient().prompt(), state).system(system).stream().chatResponse());
 	}
 
 	@Override
 	public Flux<ChatResponse> callUserWithState(String user, OverAllState state) {
-		return applyThinkingOptions(registry.getChatClient().prompt(), state).user(user).stream().chatResponse();
+		return callUserWithState(user, state, null);
+	}
+
+	@Override
+	public Flux<ChatResponse> callUserWithState(String user, OverAllState state, boolean thinkingEnabled) {
+		return callUserWithState(user, state, Boolean.valueOf(thinkingEnabled));
+	}
+
+	private Flux<ChatResponse> callUserWithState(String user, OverAllState state, Boolean thinkingOverride) {
+		return hideThinkingProcess(applyThinkingOptions(registry.getChatClient().prompt(), state, thinkingOverride)
+			.user(user)
+			.stream()
+			.chatResponse());
 	}
 
 	private ChatClient.ChatClientRequestSpec applyThinkingOptions(ChatClient.ChatClientRequestSpec spec,
 			OverAllState state) {
-		Boolean enabled = StateUtil.getObjectValue(state, THINKING_ENABLED, Boolean.class, (Boolean) null);
+		return applyThinkingOptions(spec, state, null);
+	}
+
+	private ChatClient.ChatClientRequestSpec applyThinkingOptions(ChatClient.ChatClientRequestSpec spec,
+			OverAllState state, Boolean thinkingOverride) {
+		Boolean enabled = thinkingOverride != null ? thinkingOverride
+			: StateUtil.getObjectValue(state, THINKING_ENABLED, Boolean.class, (Boolean) null);
 		if (enabled == null) {
 			return spec;
 		}

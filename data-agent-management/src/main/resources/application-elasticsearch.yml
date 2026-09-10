@@ -10,3 +10,11 @@ spring:
         index-name: ${ELASTICSEARCH_INDEX_NAME:spring-ai-document-index}
         dimensions: ${ELASTICSEARCH_DIMENSIONS:1024}
         initialize-schema: ${ELASTICSEARCH_INITIALIZE_SCHEMA:true}
+    alibaba:
+      data-agent:
+        elasticsearch:
+          disk-watermark:
+            enabled: ${DATA_AGENT_ES_DISK_WATERMARK_ENABLED:true}
+            low: ${DATA_AGENT_ES_DISK_WATERMARK_LOW:96%}
+            high: ${DATA_AGENT_ES_DISK_WATERMARK_HIGH:98%}
+            flood-stage: ${DATA_AGENT_ES_DISK_WATERMARK_FLOOD_STAGE:99%}
