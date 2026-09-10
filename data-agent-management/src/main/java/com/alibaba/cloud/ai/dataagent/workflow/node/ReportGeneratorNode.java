@@ -39,6 +39,7 @@ import reactor.core.publisher.Flux;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Comparator;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -57,6 +58,12 @@ import static com.alibaba.cloud.ai.dataagent.constant.Constant.*;
 @Slf4j
 @Component
 public class ReportGeneratorNode implements NodeAction {
+
+	private static final String EMPTY_REPORT_MESSAGE = "报告生成失败：模型未返回报告内容，请重试。";
+
+	private static final String REPORT_SYSTEM_INSTRUCTION = """
+			Generate the final user-visible Markdown report from the provided execution results.
+			""";
 
 	private static final Pattern FENCED_CODE_LINE = Pattern.compile("(?m)^\\s*```");
 
@@ -103,17 +110,31 @@ public class ReportGeneratorNode implements NodeAction {
 		catch (NumberFormatException ignore) {
 			// ignore parse error, treat as global config
 		}
+		Long resolvedAgentId = agentId;
 
 		// Generate report streaming flux
-		StringBuilder generatedReport = new StringBuilder();
-		Flux<ChatResponse> reportGenerationFlux = generateReport(userInput, plan, executionResults,
-				summaryAndRecommendations, agentId, state)
-			.doOnNext(response -> generatedReport.append(ChatResponseUtil.getText(response)));
+		// Tagged provider reasoning is removed across streaming chunks. The report itself
+		// does not need a transport marker or a special first-line format.
 		String lineageMarkdown = buildLineageMarkdown(lineageSources);
-		reportGenerationFlux = reportGenerationFlux.concatWith(Flux.defer(() -> {
-			String suffix = buildReportSuffix(generatedReport.toString(), lineageMarkdown);
-			return suffix.isEmpty() ? Flux.empty() : Flux.just(ChatResponseUtil.createPureResponse(suffix));
-		}));
+		Flux<ChatResponse> generated = generateReport(userInput, plan, executionResults, summaryAndRecommendations,
+				resolvedAgentId, state);
+		Flux<ChatResponse> reportGenerationFlux = Flux.defer(() -> {
+			StringBuilder generatedReport = new StringBuilder();
+			Flux<ChatResponse> normalized = ChatResponseUtil.hideThinkingProcess(generated)
+				.concatMap(response -> {
+					if (isOutputTruncated(response)) {
+						return Flux.error(new IllegalStateException("报告生成被模型输出上限截断，请缩小查询范围或提高模型 maxTokens 后重试。"));
+					}
+					// ECharts JSON and Markdown fences frequently span provider chunks. Rewriting
+					// those chunks here can move a fence ahead of its JSON, corrupting the report.
+					return Flux.just(response);
+				})
+				.doOnNext(response -> generatedReport.append(ChatResponseUtil.getText(response)));
+			return normalized.concatWith(Flux.defer(() -> {
+				String suffix = buildReportSuffix(generatedReport.toString(), lineageMarkdown);
+				return suffix.isEmpty() ? Flux.empty() : Flux.just(ChatResponseUtil.createPureResponse(suffix));
+			}));
+		});
 
 		TextType reportTextType = TextType.MARK_DOWN;
 
@@ -136,8 +157,19 @@ public class ReportGeneratorNode implements NodeAction {
 		return Map.of(RESULT, generator);
 	}
 
+	private boolean isOutputTruncated(ChatResponse response) {
+		if (response == null || response.getResult() == null || response.getResult().getMetadata() == null) {
+			return false;
+		}
+		String finishReason = response.getResult().getMetadata().getFinishReason();
+		return "LENGTH".equalsIgnoreCase(finishReason);
+	}
+
 	String buildReportSuffix(String generatedReport, String lineageMarkdown) {
 		StringBuilder suffix = new StringBuilder();
+		if (generatedReport == null || generatedReport.isBlank()) {
+			suffix.append(EMPTY_REPORT_MESSAGE);
+		}
 		Matcher matcher = FENCED_CODE_LINE.matcher(generatedReport == null ? "" : generatedReport);
 		int fenceCount = 0;
 		while (matcher.find()) {
@@ -223,13 +255,26 @@ public class ReportGeneratorNode implements NodeAction {
 		String analysisStepsAndData = buildAnalysisStepsAndData(plan, executionResults);
 
 		// Get optimization configs if available (优先按智能体加载)
-		List<UserPromptConfig> optimizationConfigs = promptConfigService.getOptimizationConfigs("report-generator",
-				agentId);
+		List<UserPromptConfig> optimizationConfigs = selectHighestPriorityOptimizationConfig(
+				promptConfigService.getOptimizationConfigs("report-generator", agentId));
 
 		String reportPrompt = PromptHelper.buildReportGeneratorPromptWithOptimization(userRequirementsAndPlan,
 				analysisStepsAndData, summaryAndRecommendations, optimizationConfigs);
 		log.debug("Report Node Prompt: \n {} \n", reportPrompt);
-		return llmService.callUserWithState(reportPrompt, state);
+		// Final reports are user-facing artifacts. Disable provider reasoning for this
+		// request even when the conversation has thinking enabled globally.
+		return llmService.callWithState(REPORT_SYSTEM_INSTRUCTION, reportPrompt, state, false);
+	}
+
+	private List<UserPromptConfig> selectHighestPriorityOptimizationConfig(List<UserPromptConfig> configs) {
+		if (configs == null || configs.isEmpty()) {
+			return List.of();
+		}
+		return configs.stream()
+			.filter(config -> config != null)
+			.max(Comparator.comparingInt(config -> config.getPriority() == null ? 0 : config.getPriority()))
+			.map(List::of)
+			.orElseGet(List::of);
 	}
 
 	/**
@@ -241,7 +286,7 @@ public class ReportGeneratorNode implements NodeAction {
 		sb.append(userInput).append("\n\n");
 
 		sb.append("## 执行计划概述\n");
-		sb.append("**思考过程**: ").append(plan.getThoughtProcess()).append("\n\n");
+		sb.append("执行计划仅用于说明已完成的业务步骤；不包含内部推理。\n\n");
 
 		sb.append("## 详细执行步骤\n");
 		List<ExecutionStep> executionPlan = plan.getExecutionPlan();

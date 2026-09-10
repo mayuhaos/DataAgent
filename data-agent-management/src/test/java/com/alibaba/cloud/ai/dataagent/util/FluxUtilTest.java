@@ -15,11 +15,17 @@
  */
 package com.alibaba.cloud.ai.dataagent.util;
 
+import com.alibaba.cloud.ai.graph.OverAllState;
+import com.alibaba.cloud.ai.graph.action.NodeAction;
 import org.junit.jupiter.api.Test;
+import org.springframework.ai.chat.model.ChatResponse;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.test.StepVerifier;
 
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
 import java.util.function.Function;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -130,6 +136,23 @@ class FluxUtilTest {
 		Flux<String> result = FluxUtil.cascadeFlux(origin, nextFunc, aggregator);
 
 		StepVerifier.create(result).expectNext("single").expectNext("processed:single").verifyComplete();
+	}
+
+	@Test
+	void createStreamingGenerator_repeatedSubscriptionsDoNotShareCollectedResult() {
+		Flux<ChatResponse> source = Flux.just(ChatResponseUtil.createPureResponse("a"),
+				ChatResponseUtil.createPureResponse("b"));
+		List<String> mappedResults = new ArrayList<>();
+		Flux<?> result = FluxUtil.createStreamingGeneratorWithMessages(NodeAction.class, new OverAllState(), null, null,
+				value -> {
+					mappedResults.add(value);
+					return Map.of("result", value);
+				}, source);
+
+		result.blockLast();
+		result.blockLast();
+
+		assertEquals(List.of("ab", "ab"), mappedResults);
 	}
 
 }

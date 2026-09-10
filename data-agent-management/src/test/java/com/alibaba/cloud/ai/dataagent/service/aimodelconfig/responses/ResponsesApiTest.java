@@ -45,10 +45,25 @@ class ResponsesApiTest {
 
 	@Test
 	void parseDeltaEvent_returnsDeltaText() {
-		StreamEvent event = parse("{\"type\":\"response.output_text.delta\",\"delta\":\"Hello\"}");
+		StreamEvent event = parse(
+				"{\"type\":\"response.output_text.delta\",\"output_index\":3,\"delta\":\"Hello\"}");
 		assertNotNull(event);
 		assertEquals(StreamEvent.Type.DELTA, event.type());
 		assertEquals("Hello", event.delta());
+		assertEquals(3, event.outputIndex());
+	}
+
+	@Test
+	void parseMessageStart_preservesOutputIndexAndPhase() {
+		StreamEvent event = parse("""
+				{"type":"response.output_item.added","output_index":1,
+				 "item":{"type":"message","role":"assistant","phase":"commentary","content":[]}}
+				""");
+
+		assertNotNull(event);
+		assertEquals(StreamEvent.Type.MESSAGE_START, event.type());
+		assertEquals(1, event.outputIndex());
+		assertEquals("commentary", event.phase());
 	}
 
 	@Test

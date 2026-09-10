@@ -86,7 +86,17 @@ public class StreamLlmService implements LlmService {
 
 	@Override
 	public Flux<ChatResponse> callWithState(String system, String user, OverAllState state) {
-		return hideThinkingProcess(applyThinkingOptions(registry.getChatClient().prompt(), state).system(system)
+		return callWithState(system, user, state, null);
+	}
+
+	@Override
+	public Flux<ChatResponse> callWithState(String system, String user, OverAllState state, boolean thinkingEnabled) {
+		return callWithState(system, user, state, Boolean.valueOf(thinkingEnabled));
+	}
+
+	private Flux<ChatResponse> callWithState(String system, String user, OverAllState state, Boolean thinkingOverride) {
+		return hideThinkingProcess(applyThinkingOptions(registry.getChatClient().prompt(), state, thinkingOverride)
+			.system(system)
 			.user(user)
 			.stream()
 			.chatResponse());
@@ -100,13 +110,30 @@ public class StreamLlmService implements LlmService {
 
 	@Override
 	public Flux<ChatResponse> callUserWithState(String user, OverAllState state) {
-		return hideThinkingProcess(
-				applyThinkingOptions(registry.getChatClient().prompt(), state).user(user).stream().chatResponse());
+		return callUserWithState(user, state, null);
+	}
+
+	@Override
+	public Flux<ChatResponse> callUserWithState(String user, OverAllState state, boolean thinkingEnabled) {
+		return callUserWithState(user, state, Boolean.valueOf(thinkingEnabled));
+	}
+
+	private Flux<ChatResponse> callUserWithState(String user, OverAllState state, Boolean thinkingOverride) {
+		return hideThinkingProcess(applyThinkingOptions(registry.getChatClient().prompt(), state, thinkingOverride)
+			.user(user)
+			.stream()
+			.chatResponse());
 	}
 
 	private ChatClient.ChatClientRequestSpec applyThinkingOptions(ChatClient.ChatClientRequestSpec spec,
 			OverAllState state) {
-		Boolean enabled = StateUtil.getObjectValue(state, THINKING_ENABLED, Boolean.class, (Boolean) null);
+		return applyThinkingOptions(spec, state, null);
+	}
+
+	private ChatClient.ChatClientRequestSpec applyThinkingOptions(ChatClient.ChatClientRequestSpec spec,
+			OverAllState state, Boolean thinkingOverride) {
+		Boolean enabled = thinkingOverride != null ? thinkingOverride
+			: StateUtil.getObjectValue(state, THINKING_ENABLED, Boolean.class, (Boolean) null);
 		if (enabled == null) {
 			return spec;
 		}

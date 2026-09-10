@@ -40,6 +40,7 @@ import org.springframework.util.StringUtils;
 import reactor.core.publisher.Flux;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -86,6 +87,7 @@ public class ResponsesApiChatModel implements ChatModel {
 		// 每次订阅独立创建（defer），避免同一 Flux 被多次订阅时状态串扰
 		return Flux.defer(() -> {
 			AtomicBoolean deltaReceived = new AtomicBoolean(false);
+			Map<Integer, String> messagePhases = new HashMap<>();
 
 			// 将 SSE 事件转为 ChatResponse 流，与 OpenAiChatModel 的流式行为对齐：
 			// - delta 事件 → 包含文本块的 ChatResponse（逐 token 推送）
@@ -93,7 +95,17 @@ public class ResponsesApiChatModel implements ChatModel {
 			// - incomplete 事件 → 终包：finishReason=LENGTH
 			// - error 事件 → Flux.error 向上传播，由节点重试机制接管
 			return responsesApi.stream(request).concatMap(event -> switch (event.type()) {
+				case MESSAGE_START -> {
+					if (event.outputIndex() != null) {
+						messagePhases.put(event.outputIndex(), event.phase());
+					}
+					yield Flux.empty();
+				}
 				case DELTA -> {
+					String phase = event.outputIndex() == null ? null : messagePhases.get(event.outputIndex());
+					if (!isFinalAnswerPhase(phase)) {
+						yield Flux.empty();
+					}
 					// 文本增量：构建只含文本的 ChatResponse；delta 为 null 时按空串处理，避免 NPE
 					deltaReceived.set(true);
 					String delta = event.delta() != null ? event.delta() : "";
@@ -262,10 +274,17 @@ public class ResponsesApiChatModel implements ChatModel {
 			return "";
 		}
 
+		boolean hasFinalAnswer = response.output()
+			.stream()
+			.anyMatch(item -> "message".equals(item.type()) && "final_answer".equalsIgnoreCase(item.phase()));
 		StringBuilder sb = new StringBuilder();
 		for (OutputItem outputItem : response.output()) {
 			// 只处理 message 类型的输出项
-			if ("message".equals(outputItem.type()) && outputItem.content() != null) {
+			if ("message".equals(outputItem.type()) && outputItem.content() != null
+					// Some Responses-compatible providers emit a message phase such as
+					// commentary but never emit final_answer. In that case it is the only
+					// user-visible response and must be retained for the terminal fallback.
+					&& (!hasFinalAnswer || "final_answer".equalsIgnoreCase(outputItem.phase()))) {
 				for (ContentPart part : outputItem.content()) {
 					// 只提取 output_text 类型的文本内容
 					if ("output_text".equals(part.type()) && part.text() != null) {
@@ -275,6 +294,10 @@ public class ResponsesApiChatModel implements ChatModel {
 			}
 		}
 		return sb.toString();
+	}
+
+	private boolean isFinalAnswerPhase(String phase) {
+		return !StringUtils.hasText(phase) || "final_answer".equalsIgnoreCase(phase);
 	}
 
 	/**

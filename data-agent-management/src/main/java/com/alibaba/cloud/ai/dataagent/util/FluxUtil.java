@@ -87,23 +87,19 @@ public final class FluxUtil {
 	public static Flux<GraphResponse<StreamingOutput>> createStreamingGeneratorWithMessages(
 			Class<? extends NodeAction> nodeClass, OverAllState state, String startMessage, String completionMessage,
 			Function<String, Map<String, Object>> resultMapper, Flux<ChatResponse> sourceFlux) {
-		String nodeName = nodeClass.getSimpleName();
-
-		// Used to collect actual processing results
-		final StringBuilder collectedResult = new StringBuilder();
-
-		// wrapperFlux
-		Flux<ChatResponse> startFlux = (startMessage == null ? Flux.empty()
-				: Flux.just(ChatResponseUtil.createResponse(startMessage)));
-		Flux<ChatResponse> wrapperFlux = startFlux.concatWith(sourceFlux.doOnNext(chatResponse -> {
-			String text = ChatResponseUtil.getText(chatResponse);
-			collectedResult.append(text);
-		}));
-		if (completionMessage != null) {
-			wrapperFlux = wrapperFlux.concatWith(Flux.just(ChatResponseUtil.createResponse(completionMessage)));
-		}
-		return toStreamingResponseFlux(nodeName, state, wrapperFlux,
-				() -> resultMapper.apply(collectedResult.toString()));
+		return Flux.defer(() -> {
+			String nodeName = nodeClass.getSimpleName();
+			StringBuilder collectedResult = new StringBuilder();
+			Flux<ChatResponse> startFlux = startMessage == null ? Flux.empty()
+					: Flux.just(ChatResponseUtil.createResponse(startMessage));
+			Flux<ChatResponse> wrapperFlux = startFlux.concatWith(sourceFlux.doOnNext(
+					chatResponse -> collectedResult.append(ChatResponseUtil.getText(chatResponse))));
+			if (completionMessage != null) {
+				wrapperFlux = wrapperFlux.concatWith(Flux.just(ChatResponseUtil.createResponse(completionMessage)));
+			}
+			return toStreamingResponseFlux(nodeName, state, wrapperFlux,
+					() -> resultMapper.apply(collectedResult.toString()));
+		});
 	}
 
 	public static Flux<GraphResponse<StreamingOutput>> createStreamingGeneratorWithMessages(
@@ -125,12 +121,14 @@ public final class FluxUtil {
 	public static Flux<GraphResponse<StreamingOutput>> createStreamingGenerator(Class<? extends NodeAction> nodeClass,
 			OverAllState state, Flux<ChatResponse> sourceFlux, Flux<ChatResponse> preFlux, Flux<ChatResponse> sufFlux,
 			Function<String, Map<String, Object>> sourceMapper) {
-		String nodeName = nodeClass.getSimpleName();
-		// Used to collect actual processing results
-		final StringBuilder collectedResult = new StringBuilder();
-		sourceFlux = sourceFlux.doOnNext(r -> collectedResult.append(ChatResponseUtil.getText(r)));
-		return toStreamingResponseFlux(nodeName, state, Flux.concat(preFlux, sourceFlux, sufFlux),
-				() -> sourceMapper.apply(collectedResult.toString()));
+		return Flux.defer(() -> {
+			String nodeName = nodeClass.getSimpleName();
+			StringBuilder collectedResult = new StringBuilder();
+			Flux<ChatResponse> collectedSource = sourceFlux
+				.doOnNext(response -> collectedResult.append(ChatResponseUtil.getText(response)));
+			return toStreamingResponseFlux(nodeName, state, Flux.concat(preFlux, collectedSource, sufFlux),
+					() -> sourceMapper.apply(collectedResult.toString()));
+		});
 	}
 
 	private static Flux<GraphResponse<StreamingOutput>> toStreamingResponseFlux(String nodeName, OverAllState state,

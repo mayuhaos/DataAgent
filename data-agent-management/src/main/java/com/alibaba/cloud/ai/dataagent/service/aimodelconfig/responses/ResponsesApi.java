@@ -132,10 +132,25 @@ public class ResponsesApi {
 			}
 
 			return switch (type) {
+				// 消息开始事件携带 phase。部分 Responses API 兼容服务会同时返回
+				// commentary 和 final_answer，后续 delta 必须按 output_index 归属。
+				case "response.output_item.added" -> {
+					Object rawItem = eventMap.get("item");
+					if (rawItem == null) {
+						yield null;
+					}
+					OutputItem item = OBJECT_MAPPER.convertValue(rawItem, OutputItem.class);
+					if (!"message".equals(item.type())) {
+						yield null;
+					}
+					yield new StreamEvent(StreamEvent.Type.MESSAGE_START, null, null, null,
+							integerValue(eventMap.get("output_index")), item.phase());
+				}
 				// 文本增量：产出一个 delta 文本块
 				case "response.output_text.delta" -> {
 					String delta = (String) eventMap.get("delta");
-					yield new StreamEvent(StreamEvent.Type.DELTA, delta, null, null);
+					yield new StreamEvent(StreamEvent.Type.DELTA, delta, null, null,
+							integerValue(eventMap.get("output_index")), null);
 				}
 				// 响应完成：携带完整响应（含 usage）
 				case "response.completed" -> {
@@ -172,6 +187,10 @@ public class ResponsesApi {
 			log.warn("解析 Responses API SSE 事件失败，跳过: {}", abbreviate(data), e);
 			return null;
 		}
+	}
+
+	private Integer integerValue(Object value) {
+		return value instanceof Number number ? number.intValue() : null;
 	}
 
 	/** 日志输出时保留的 SSE 负载最大长度 */
@@ -276,7 +295,11 @@ public class ResponsesApi {
 	 * 类型的文本内容。
 	 */
 	@JsonIgnoreProperties(ignoreUnknown = true)
-	public record OutputItem(String type, String role, List<ContentPart> content) {
+	public record OutputItem(String type, String role, List<ContentPart> content, String phase) {
+
+		public OutputItem(String type, String role, List<ContentPart> content) {
+			this(type, role, content, null);
+		}
 	}
 
 	/**
@@ -304,10 +327,17 @@ public class ResponsesApi {
 	/**
 	 * 流式 SSE 事件的统一封装
 	 */
-	public record StreamEvent(Type type, String delta, ResponsesResponse response, String errorMessage) {
+	public record StreamEvent(Type type, String delta, ResponsesResponse response, String errorMessage,
+			Integer outputIndex, String phase) {
+
+		public StreamEvent(Type type, String delta, ResponsesResponse response, String errorMessage) {
+			this(type, delta, response, errorMessage, null, null);
+		}
 
 		public enum Type {
 
+			/** assistant message 开始，携带 output_index 与 phase */
+			MESSAGE_START,
 			/** 文本增量 */
 			DELTA,
 			/** 响应完成（携带 usage） */

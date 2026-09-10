@@ -44,6 +44,23 @@ public interface LlmService {
 		return callUser(user);
 	}
 
+	/**
+	 * Calls the user prompt with an explicit thinking-mode override for this request.
+	 * Implementations that do not expose provider options retain their normal behavior.
+	 */
+	default Flux<ChatResponse> callUserWithState(String user, OverAllState state, boolean thinkingEnabled) {
+		return callUserWithState(user, state);
+	}
+
+	/**
+	 * Calls a system and user prompt with an explicit thinking-mode override for this
+	 * request. Implementations that do not expose provider options retain their
+	 * normal behavior.
+	 */
+	default Flux<ChatResponse> callWithState(String system, String user, OverAllState state, boolean thinkingEnabled) {
+		return callWithState(system, user, state);
+	}
+
 	@Deprecated
 	default String blockToString(Flux<ChatResponse> responseFlux) {
 		return toStringFlux(responseFlux).collect(StringBuilder::new, StringBuilder::append)

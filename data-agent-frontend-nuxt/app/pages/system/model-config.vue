@@ -501,7 +501,9 @@ const rules = {
 			? true
 			: '该字段为必填项',
 	maxTokens: (value: number) =>
-		value >= 100 && value <= 10000 ? true : 'Token 范围需在 100 - 10000 之间',
+		value >= 100 && value <= 384000
+			? true
+			: 'Token 范围需在 100 - 384000 之间',
 };
 
 const dialogTitle = computed(() =>

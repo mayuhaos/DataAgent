@@ -71,6 +71,15 @@ class ResponsesApiChatModelTest {
 				null, null);
 	}
 
+	private ResponsesResponse phasedResponse(String commentary, String finalAnswer) {
+		OutputItem commentaryItem = new OutputItem("message", "assistant",
+				List.of(new ContentPart("output_text", commentary)), "commentary");
+		OutputItem finalItem = new OutputItem("message", "assistant",
+				List.of(new ContentPart("output_text", finalAnswer)), "final_answer");
+		return new ResponsesResponse("resp_phased", "gpt-test", "completed",
+				List.of(commentaryItem, finalItem), new ResponsesUsage(10, 5, 15), null, null);
+	}
+
 	// ======================== 请求映射 ========================
 
 	@Test
@@ -199,6 +208,15 @@ class ResponsesApiChatModelTest {
 	}
 
 	@Test
+	void call_extractsOnlyFinalAnswerFromPhasedOutput() {
+		when(responsesApi.call(any())).thenReturn(phasedResponse("internal commentary", "final report"));
+
+		ChatResponse response = chatModel.call(new Prompt(List.of(new UserMessage("hi"))));
+
+		assertEquals("final report", response.getResult().getOutput().getText());
+	}
+
+	@Test
 	void call_incompleteWithMaxTokens_mapsToLengthFinishReason() {
 		OutputItem item = new OutputItem("message", "assistant", List.of(new ContentPart("output_text", "partial")));
 		ResponsesResponse incomplete = new ResponsesResponse("resp_2", "gpt-test", "incomplete", List.of(item), null,
@@ -236,6 +254,41 @@ class ResponsesApiChatModelTest {
 		StringBuilder aggregated = new StringBuilder();
 		chunks.forEach(c -> aggregated.append(c.getResult().getOutput().getText()));
 		assertEquals("Hello world", aggregated.toString());
+	}
+
+	@Test
+	void stream_discardsCommentaryAndEmitsOnlyFinalAnswer() {
+		ResponsesResponse completed = phasedResponse("internal commentary", "final report");
+		when(responsesApi.stream(any())).thenReturn(Flux.just(
+				new StreamEvent(StreamEvent.Type.MESSAGE_START, null, null, null, 1, "commentary"),
+				new StreamEvent(StreamEvent.Type.DELTA, "internal commentary", null, null, 1, null),
+				new StreamEvent(StreamEvent.Type.MESSAGE_START, null, null, null, 3, "final_answer"),
+				new StreamEvent(StreamEvent.Type.DELTA, "final report", null, null, 3, null),
+				new StreamEvent(StreamEvent.Type.COMPLETED, null, completed, null)));
+
+		List<ChatResponse> chunks = chatModel.stream(new Prompt(List.of(new UserMessage("hi")))).collectList().block();
+
+		assertNotNull(chunks);
+		assertEquals("final report",
+				chunks.stream().map(chunk -> chunk.getResult().getOutput().getText()).reduce("", String::concat));
+	}
+
+	@Test
+	void stream_commentaryOnlyProviderFallsBackToItsCompletedMessage() {
+		OutputItem commentary = new OutputItem("message", "assistant",
+				List.of(new ContentPart("output_text", "report from compatibility provider")), "commentary");
+		ResponsesResponse completed = new ResponsesResponse("resp_commentary", "gpt-test", "completed",
+				List.of(commentary), null, null, null);
+		when(responsesApi.stream(any())).thenReturn(Flux.just(
+				new StreamEvent(StreamEvent.Type.MESSAGE_START, null, null, null, 1, "commentary"),
+				new StreamEvent(StreamEvent.Type.DELTA, "report from compatibility provider", null, null, 1, null),
+				new StreamEvent(StreamEvent.Type.COMPLETED, null, completed, null)));
+
+		List<ChatResponse> chunks = chatModel.stream(new Prompt(List.of(new UserMessage("hi")))).collectList().block();
+
+		assertNotNull(chunks);
+		assertEquals("report from compatibility provider", chunks.get(0).getResult().getOutput().getText());
+		assertEquals("STOP", chunks.get(0).getResult().getMetadata().getFinishReason());
 	}
 
 	@Test
