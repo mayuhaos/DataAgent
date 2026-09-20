@@ -22,6 +22,8 @@ import axios from 'axios';
 
 export interface GraphRequest {
 	agentId: string;
+	/** Stable chat session. Kept across ordinary follow-up questions. */
+	sessionId?: string;
 	threadId?: string;
 	query: string;
 	humanFeedback: boolean;
@@ -79,6 +81,7 @@ class GraphService {
 	): Promise<() => void> {
 		const params = new URLSearchParams();
 		params.append('agentId', request.agentId);
+		if (request.sessionId) params.append('sessionId', request.sessionId);
 		if (request.threadId) params.append('threadId', request.threadId);
 		params.append('query', request.query);
 		params.append('humanFeedback', request.humanFeedback.toString());
@@ -190,9 +193,9 @@ class GraphService {
 		};
 	}
 
-	async stopStream(threadId: string): Promise<void> {
+	async stopStream(threadId?: string, sessionId?: string): Promise<void> {
 		await axios.post(`${API_BASE_URL}/stream/search/stop`, null, {
-			params: { threadId },
+			params: { threadId, sessionId },
 		});
 	}
 }

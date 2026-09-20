@@ -28,6 +28,7 @@ import com.alibaba.cloud.ai.dataagent.service.chat.ChatMessageService;
 import com.alibaba.cloud.ai.dataagent.service.chat.ChatSessionService;
 import com.alibaba.cloud.ai.dataagent.util.JsonUtil;
 import com.alibaba.cloud.ai.dataagent.vo.GraphNodeResponse;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.alibaba.cloud.ai.dataagent.workflow.node.ClarificationNode;
 import com.alibaba.cloud.ai.dataagent.workflow.node.PlannerNode;
 import com.alibaba.cloud.ai.graph.CompileConfig;
@@ -156,6 +157,7 @@ public class GraphServiceImpl implements GraphService {
 		context.setAgentId(graphRequest.getAgentId());
 		context.setThreadId(threadId);
 		context.setConversationId(graphRequest.getConversationId());
+		context.setMultiTurnContextId(getMultiTurnContextId(graphRequest));
 
 		if (StringUtils.hasText(graphRequest.getHumanFeedbackContent())) {
 			handleHumanFeedback(graphRequest);
@@ -192,32 +194,39 @@ public class GraphServiceImpl implements GraphService {
 	}
 
 	@Override
-	public void stopStreamProcessing(String threadId) {
+	public boolean stopStreamProcessing(String threadId) {
 		if (!StringUtils.hasText(threadId)) {
-			return;
+			return false;
 		}
 		log.info("Stopping stream processing for threadId: {}", threadId);
-		multiTurnContextManager.discardPending(threadId);
 		StreamContext context = streamContextMap.remove(threadId);
-		if (context != null) {
-			if (context.getSpan() != null && context.getSpan().isRecording()) {
-				langfuseReporter.endSpanSuccess(context.getSpan(), threadId, context.getCollectedOutput());
-			}
-			context.cleanup();
-			log.info("Cleaned up stream context for threadId: {}", threadId);
+		if (context == null || context.isCleaned()) {
+			log.info("No active stream processing found for threadId: {}", threadId);
+			return false;
 		}
+		multiTurnContextManager.discardPending(getMultiTurnContextId(context));
+		if (context.getSpan() != null && context.getSpan().isRecording()) {
+			langfuseReporter.endSpanSuccess(context.getSpan(), threadId, context.getCollectedOutput());
+		}
+		context.cleanup();
+		log.info("Cleaned up stream context for threadId: {}", threadId);
+		return true;
 	}
 
 	@Override
-	public void stopStreamProcessingByConversationId(String conversationId) {
+	public boolean stopStreamProcessingByConversationId(String conversationId) {
 		if (!StringUtils.hasText(conversationId)) {
-			return;
+			return false;
 		}
-		streamContextMap.forEach((threadId, context) -> {
+		boolean stopped = false;
+		for (Map.Entry<String, StreamContext> entry : streamContextMap.entrySet()) {
+			String threadId = entry.getKey();
+			StreamContext context = entry.getValue();
 			if (conversationId.equals(context.getConversationId())) {
-				stopStreamProcessing(threadId);
+				stopped |= stopStreamProcessing(threadId);
 			}
-		});
+		}
+		return stopped;
 	}
 
 	private void emitReconnectFailure(Sinks.Many<ServerSentEvent<GraphNodeResponse>> sink, GraphRequest graphRequest) {
@@ -304,8 +313,9 @@ public class GraphServiceImpl implements GraphService {
 		Span span = langfuseReporter.startLLMSpan("graph-stream", graphRequest);
 		context.setSpan(span);
 
-		String multiTurnContext = multiTurnContextManager.buildContext(threadId);
-		multiTurnContextManager.beginTurn(threadId, inputQuery);
+		String multiTurnContextId = getMultiTurnContextId(graphRequest);
+		String multiTurnContext = buildMultiTurnContext(graphRequest, multiTurnContextId);
+		multiTurnContextManager.beginTurn(multiTurnContextId, inputQuery);
 		Flux<NodeOutput> nodeOutputFlux = compiledGraph.stream(
 				buildInitialState(agentId, threadId, inputQuery, originalUserQuery, multiTurnContext, nl2sqlOnly,
 						humanReviewEnabled, clarificationCount, clarificationAnswer, graphRequest.getThinkingEnabled(),
@@ -346,6 +356,81 @@ public class GraphServiceImpl implements GraphService {
 				: ReasoningEffort.HIGH.getCode();
 	}
 
+	private String getMultiTurnContextId(GraphRequest request) {
+		return StringUtils.hasText(request.getConversationId()) ? request.getConversationId() : request.getThreadId();
+	}
+
+	private String getMultiTurnContextId(StreamContext context) {
+		return getMultiTurnContextId(context, context.getThreadId());
+	}
+
+	private String getMultiTurnContextId(StreamContext context, String fallbackThreadId) {
+		if (context != null && StringUtils.hasText(context.getMultiTurnContextId())) {
+			return context.getMultiTurnContextId();
+		}
+		return fallbackThreadId;
+	}
+
+	/**
+	 * Prefer the bounded live memory. After a process restart the default memory
+	 * repository may be empty, so rebuild a compact, planner-focused context from
+	 * session messages and the server-owned execution timelines.
+	 */
+	private String buildMultiTurnContext(GraphRequest request, String multiTurnContextId) {
+		String inMemoryContext = multiTurnContextManager.buildContext(multiTurnContextId);
+		if (!"(无)".equals(inMemoryContext) || !StringUtils.hasText(request.getConversationId())) {
+			return inMemoryContext;
+		}
+
+		List<ChatMessage> messages = chatMessageService.findBySessionId(request.getConversationId());
+		List<String> entries = new java.util.ArrayList<>();
+		for (ChatMessage message : messages) {
+			if ("user".equals(message.getRole()) && StringUtils.hasText(message.getContent())) {
+				entries.add("用户: " + message.getContent().trim());
+			}
+			else if ("timeline".equals(message.getMessageType())) {
+				String plannerOutput = extractPlannerOutput(message.getContent());
+				if (StringUtils.hasText(plannerOutput)) {
+					entries.add("AI计划: " + plannerOutput);
+				}
+			}
+		}
+		if (entries.isEmpty()) {
+			return "(无)";
+		}
+		int start = Math.max(0, entries.size() - 10);
+		return String.join("\n", entries.subList(start, entries.size()));
+	}
+
+	private String extractPlannerOutput(String timeline) {
+		if (!StringUtils.hasText(timeline)) {
+			return null;
+		}
+		try {
+			StringBuilder plannerOutput = new StringBuilder();
+			JsonNode blocks = JsonUtil.getObjectMapper().readTree(timeline);
+			if (!blocks.isArray()) {
+				return null;
+			}
+			for (JsonNode block : blocks) {
+				if (!block.isArray()) {
+					continue;
+				}
+				for (JsonNode response : block) {
+					if (PlannerNode.class.getSimpleName().equals(response.path("nodeName").asText())) {
+						plannerOutput.append(response.path("text").asText());
+					}
+				}
+			}
+			String compactPlan = plannerOutput.toString().trim();
+			return compactPlan.length() <= 4000 ? compactPlan : compactPlan.substring(0, 4000) + "...";
+		}
+		catch (Exception ex) {
+			log.debug("Skipping malformed persisted timeline while rebuilding multi-turn context", ex);
+			return null;
+		}
+	}
+
 	private void handleHumanFeedback(GraphRequest graphRequest) {
 		String agentId = graphRequest.getAgentId();
 		String threadId = graphRequest.getThreadId();
@@ -369,13 +454,13 @@ public class GraphServiceImpl implements GraphService {
 				feedbackContent);
 		Map<String, Object> stateUpdate = new HashMap<>();
 		if (graphRequest.isRejectedPlan()) {
-			multiTurnContextManager.restartLastTurn(threadId);
+			multiTurnContextManager.restartLastTurn(getMultiTurnContextId(context));
 			// A rejected plan starts a new execution attempt. Do not carry source
 			// records discovered by the rejected attempt into the replacement report.
 			stateUpdate.put(DATA_LINEAGE_SOURCES, List.of());
 		}
 		stateUpdate.put(HUMAN_FEEDBACK_DATA, feedbackData);
-		stateUpdate.put(MULTI_TURN_CONTEXT, multiTurnContextManager.buildContext(threadId));
+		stateUpdate.put(MULTI_TURN_CONTEXT, multiTurnContextManager.buildContext(getMultiTurnContextId(context)));
 
 		RunnableConfig baseConfig = RunnableConfig.builder().threadId(threadId).build();
 		RunnableConfig updatedConfig;
@@ -509,12 +594,13 @@ public class GraphServiceImpl implements GraphService {
 
 	private void handleStreamComplete(String agentId, String threadId) {
 		log.info("Stream processing completed successfully for threadId: {}", threadId);
-		multiTurnContextManager.finishTurn(threadId);
+		StreamContext context = streamContextMap.get(threadId);
+		multiTurnContextManager.finishTurn(getMultiTurnContextId(context, threadId));
 		if (!clarificationContextManager.isAwaitingClarification(threadId)) {
 			clarificationContextManager.clear(threadId);
 		}
 
-		StreamContext context = streamContextMap.remove(threadId);
+		context = streamContextMap.remove(threadId);
 			if (context != null && !context.isCleaned()) {
 				long now = System.currentTimeMillis();
 				emitFinalNodeTiming(context, agentId, threadId, now);
@@ -583,7 +669,7 @@ public class GraphServiceImpl implements GraphService {
 			beginNodeTiming(context, request.getAgentId(), threadId, node, now);
 			context.appendOutput(chunk);
 			if (PlannerNode.class.getSimpleName().equals(node)) {
-				multiTurnContextManager.appendPlannerChunk(threadId, chunk);
+				multiTurnContextManager.appendPlannerChunk(getMultiTurnContextId(context), chunk);
 			}
 			boolean isClarificationNode = ClarificationNode.class.getSimpleName().equals(node);
 			GraphNodeResponse response = GraphNodeResponse.builder()

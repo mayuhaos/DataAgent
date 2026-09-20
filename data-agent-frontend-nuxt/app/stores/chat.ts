@@ -469,6 +469,7 @@ export const useChatStore = defineStore('chat', () => {
 		const previousClarificationCount = sessionState.clarificationCount;
 		const request: GraphRequest = {
 			agentId: String(currentAgentId.value || ''),
+			sessionId: currentSession.value.id,
 			query,
 			humanFeedback: requestOptions.value.humanFeedback,
 			nl2sqlOnly: requestOptions.value.nl2sqlOnly,
@@ -476,7 +477,7 @@ export const useChatStore = defineStore('chat', () => {
 			reasoningEffort: requestOptions.value.reasoningEffort,
 			rejectedPlan: false,
 			humanFeedbackContent: undefined,
-			threadId: sessionState.lastRequest?.threadId,
+			threadId: isClarificationReply ? sessionState.lastRequest?.threadId : undefined,
 			clarificationAnswer: isClarificationReply ? query : undefined,
 			resumeMode: isClarificationReply ? 'clarification' : null,
 		};
@@ -869,22 +870,8 @@ export const useChatStore = defineStore('chat', () => {
 					persistSessionState(sessionId);
 					if (currentSession.value?.id === sessionId) isStreaming.value = false;
 				} else {
-					if (sessionState.nodeBlocks.length > 0) {
-						const timelineMsg: ChatMessage = {
-							sessionId,
-							role: 'assistant',
-							content: JSON.stringify(sessionState.nodeBlocks),
-							messageType: 'timeline',
-						};
-						const savedTimeline = await chatService
-							.saveMessage(sessionId, timelineMsg)
-							.catch((e) => {
-								console.error(e);
-								return null;
-							});
-						if (savedTimeline && currentSession.value?.id === sessionId)
-							currentMessages.value.push(savedTimeline);
-					}
+					// The backend persists the complete execution timeline. Keeping it
+					// server-owned avoids recording the same SSE trace twice.
 					const finalAnswer = streamedFinalAnswerText.trim();
 					if (finalAnswer) {
 						const finalAnswerMsg: ChatMessage = {
@@ -944,9 +931,7 @@ export const useChatStore = defineStore('chat', () => {
 
 		const threadId =
 			sessionState.threadId || sessionState.lastRequest?.threadId;
-		if (threadId) {
-			await graphService.stopStream(threadId).catch((e) => console.error(e));
-		}
+		await graphService.stopStream(threadId, sessionId).catch((e) => console.error(e));
 		sessionState.closeStream();
 		sessionState.closeStream = null;
 		sessionState.isStreaming = false;

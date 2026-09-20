@@ -51,7 +51,6 @@ import java.util.concurrent.TimeUnit;
 
 import static com.alibaba.cloud.ai.dataagent.constant.Constant.DATA_LINEAGE_SOURCES;
 
-import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -62,6 +61,7 @@ import static org.mockito.ArgumentMatchers.anyMap;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -170,6 +170,25 @@ class GraphServiceImplTest {
 	}
 
 	@Test
+	void graphStreamProcess_usesSessionIdAsTheMultiTurnMemoryKey() {
+		GraphRequest request = GraphRequest.builder()
+			.agentId("1")
+			.conversationId("session-1")
+			.threadId("new-run-thread")
+			.query("查看刚才统计的明细")
+			.build();
+		Sinks.Many<ServerSentEvent<GraphNodeResponse>> sink = Sinks.many().multicast().onBackpressureBuffer();
+		when(compiledGraph.stream(anyMap(), any(RunnableConfig.class))).thenReturn(Flux.never());
+
+		graphService.graphStreamProcess(sink, request);
+
+		verify(multiTurnContextManager).buildContext("session-1");
+		verify(multiTurnContextManager).beginTurn("session-1", "查看刚才统计的明细");
+		assertTrue(graphService.stopStreamProcessing("new-run-thread"));
+		verify(multiTurnContextManager).discardPending("session-1");
+	}
+
+	@Test
 	void graphStreamProcess_newTurnClearsCheckpointedLineageSources() throws InterruptedException {
 		GraphRequest request = GraphRequest.builder()
 			.agentId("1")
@@ -234,14 +253,14 @@ class GraphServiceImplTest {
 
 	@Test
 	void stopStreamProcessing_nullThreadId_doesNothing() {
-		assertDoesNotThrow(() -> graphService.stopStreamProcessing(null));
-		assertDoesNotThrow(() -> graphService.stopStreamProcessing(""));
+		assertFalse(graphService.stopStreamProcessing(null));
+		assertFalse(graphService.stopStreamProcessing(""));
 	}
 
 	@Test
 	void stopStreamProcessing_unknownThread_doesNothing() {
-		assertDoesNotThrow(() -> graphService.stopStreamProcessing("unknown-thread"));
-		verify(multiTurnContextManager).discardPending("unknown-thread");
+		assertFalse(graphService.stopStreamProcessing("unknown-thread"));
+		verify(multiTurnContextManager, never()).discardPending("unknown-thread");
 	}
 
 	@Test
@@ -264,7 +283,7 @@ class GraphServiceImplTest {
 			Thread.currentThread().interrupt();
 		}
 
-		graphService.stopStreamProcessing("thread-to-stop");
+		assertTrue(graphService.stopStreamProcessing("thread-to-stop"));
 		verify(multiTurnContextManager).discardPending("thread-to-stop");
 	}
 

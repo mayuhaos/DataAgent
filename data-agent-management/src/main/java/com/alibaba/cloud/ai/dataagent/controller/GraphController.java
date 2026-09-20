@@ -23,11 +23,13 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.MediaType;
 import org.springframework.http.codec.ServerSentEvent;
 import org.springframework.http.server.reactive.ServerHttpResponse;
+import org.springframework.util.StringUtils;
 import org.springframework.web.bind.annotation.*;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Sinks;
 
 import java.time.Duration;
+import java.util.Map;
 
 import static com.alibaba.cloud.ai.dataagent.constant.Constant.STREAM_EVENT_COMPLETE;
 import static com.alibaba.cloud.ai.dataagent.constant.Constant.STREAM_EVENT_ERROR;
@@ -118,8 +120,13 @@ public class GraphController {
 	}
 
 	@PostMapping("/stream/search/stop")
-	public void stopStream(@RequestParam("threadId") String threadId) {
-		graphService.stopStreamProcessing(threadId);
+	public Map<String, Boolean> stopStream(@RequestParam(value = "threadId", required = false) String threadId,
+			@RequestParam(value = "sessionId", required = false) String sessionId) {
+		boolean cancelled = StringUtils.hasText(threadId) && graphService.stopStreamProcessing(threadId);
+		if (!cancelled && StringUtils.hasText(sessionId)) {
+			cancelled = graphService.stopStreamProcessingByConversationId(sessionId);
+		}
+		return Map.of("cancelled", cancelled);
 	}
 
 }
