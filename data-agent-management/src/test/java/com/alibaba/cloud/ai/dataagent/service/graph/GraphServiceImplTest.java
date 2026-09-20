@@ -16,11 +16,13 @@
 package com.alibaba.cloud.ai.dataagent.service.graph;
 
 import com.alibaba.cloud.ai.dataagent.dto.GraphRequest;
+import com.alibaba.cloud.ai.dataagent.entity.AnalysisArtifact;
 import com.alibaba.cloud.ai.dataagent.service.graph.Context.ClarificationContextManager;
 import com.alibaba.cloud.ai.dataagent.service.graph.Context.MultiTurnContextManager;
 import com.alibaba.cloud.ai.dataagent.service.langfuse.LangfuseService;
 import com.alibaba.cloud.ai.dataagent.service.chat.ChatMessageService;
 import com.alibaba.cloud.ai.dataagent.service.chat.ChatSessionService;
+import com.alibaba.cloud.ai.dataagent.service.chat.AnalysisArtifactService;
 import com.alibaba.cloud.ai.dataagent.vo.GraphNodeResponse;
 import com.alibaba.cloud.ai.graph.CompiledGraph;
 import com.alibaba.cloud.ai.graph.OverAllState;
@@ -88,6 +90,9 @@ class GraphServiceImplTest {
 	private ChatSessionService chatSessionService;
 
 	@Mock
+	private AnalysisArtifactService analysisArtifactService;
+
+	@Mock
 	private Span mockSpan;
 
 	private GraphServiceImpl graphService;
@@ -102,11 +107,13 @@ class GraphServiceImplTest {
 		when(mockStateGraph.compile(any())).thenReturn(compiledGraph);
 
 		graphService = new GraphServiceImpl(mockStateGraph, executor, multiTurnContextManager,
-				clarificationContextManager, langfuseReporter, chatMessageService, chatSessionService);
+				clarificationContextManager, langfuseReporter, chatMessageService, chatSessionService,
+				analysisArtifactService);
 
 		when(langfuseReporter.startLLMSpan(anyString(), any())).thenReturn(mockSpan);
 		when(mockSpan.isRecording()).thenReturn(true);
 		when(multiTurnContextManager.buildContext(anyString())).thenReturn("(无)");
+		when(chatMessageService.findBySessionId(anyString())).thenReturn(List.of());
 		when(clarificationContextManager.isAwaitingClarification(anyString())).thenReturn(false);
 	}
 
@@ -186,6 +193,44 @@ class GraphServiceImplTest {
 		verify(multiTurnContextManager).beginTurn("session-1", "查看刚才统计的明细");
 		assertTrue(graphService.stopStreamProcessing("new-run-thread"));
 		verify(multiTurnContextManager).discardPending("session-1");
+	}
+
+	@Test
+	void graphStreamProcess_persistsReusableArtifactFromSqlAndResultEvents() throws InterruptedException {
+		GraphRequest request = GraphRequest.builder()
+			.agentId("1")
+			.conversationId("session-1")
+			.threadId("run-1")
+			.query("统计华东销售额")
+			.build();
+		String resultJson = "{\"resultSet\":{\"column\":[\"region\",\"amount\"],\"data\":[{\"region\":\"华东\",\"amount\":\"100\"}]},"
+				+ "\"displayStyle\":{\"type\":\"bar\",\"x\":\"region\",\"y\":[\"amount\"]}}";
+		OverAllState state = mock(OverAllState.class);
+		when(compiledGraph.stream(anyMap(), any(RunnableConfig.class)))
+			.thenReturn(Flux.just(new StreamingOutput<>("$$$sql", "SqlExecuteNode", "", state),
+					new StreamingOutput<>("SELECT region, SUM(amount) FROM orders GROUP BY region", "SqlExecuteNode", "", state),
+					new StreamingOutput<>("$$$", "SqlExecuteNode", "", state),
+					new StreamingOutput<>("$$$result_set", "SqlExecuteNode", "", state),
+					new StreamingOutput<>(resultJson, "SqlExecuteNode", "", state),
+					new StreamingOutput<>("$$$", "SqlExecuteNode", "", state)));
+
+		Sinks.Many<ServerSentEvent<GraphNodeResponse>> sink = Sinks.many().multicast().onBackpressureBuffer();
+		CountDownLatch completed = new CountDownLatch(1);
+		sink.asFlux().subscribe(event -> { }, error -> completed.countDown(), completed::countDown);
+		graphService.graphStreamProcess(sink, request);
+
+		assertTrue(completed.await(5, TimeUnit.SECONDS));
+		org.mockito.ArgumentCaptor<AnalysisArtifact> artifactCaptor = org.mockito.ArgumentCaptor
+			.forClass(AnalysisArtifact.class);
+		verify(analysisArtifactService).save(artifactCaptor.capture());
+		AnalysisArtifact artifact = artifactCaptor.getValue();
+		assertEquals("session-1", artifact.getSessionId());
+		assertEquals("统计华东销售额", artifact.getUserQuestion());
+		assertTrue(artifact.getSqlQuery().contains("SELECT region"));
+		assertEquals("SUCCESS", artifact.getStatus());
+		assertTrue(artifact.getResultSchema().contains("region"));
+		assertTrue(artifact.getResultSummary().contains("rowCount"));
+		assertTrue(artifact.getPresentationSpec().contains("bar"));
 	}
 
 	@Test

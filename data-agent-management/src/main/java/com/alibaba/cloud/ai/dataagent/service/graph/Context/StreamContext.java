@@ -58,6 +58,8 @@ public class StreamContext {
 	 */
 	private String multiTurnContextId;
 
+	private String userQuestion;
+
 	private final long workflowStartedAt = System.currentTimeMillis();
 
 	private String activeNodeName;

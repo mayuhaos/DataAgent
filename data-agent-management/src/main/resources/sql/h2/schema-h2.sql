@@ -217,6 +217,24 @@ CREATE TABLE IF NOT EXISTS chat_message (
   FOREIGN KEY (session_id) REFERENCES chat_session(id) ON DELETE CASCADE
 ) ENGINE = InnoDB COMMENT = '聊天消息表';
 
+-- 每轮问数的可复用分析产物。仅保留有限样本，完整明细仍需按权限重新查询。
+CREATE TABLE IF NOT EXISTS analysis_artifact (
+  id VARCHAR(36) NOT NULL COMMENT '分析产物ID（UUID）',
+  session_id VARCHAR(36) NOT NULL COMMENT '所属会话ID',
+  parent_artifact_id VARCHAR(36) COMMENT '本轮引用的上一分析产物',
+  user_question TEXT NOT NULL COMMENT '本轮原始问题',
+  sql_query TEXT COMMENT '实际执行SQL',
+  result_schema JSON COMMENT '结果字段',
+  result_sample JSON COMMENT '有限结果样本',
+  result_summary JSON COMMENT '结果摘要',
+  presentation_spec JSON COMMENT '图表或表格展示配置',
+  status VARCHAR(20) NOT NULL COMMENT 'SUCCESS/ERROR',
+  create_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  PRIMARY KEY (id),
+  INDEX idx_analysis_artifact_session_time (session_id, create_time),
+  FOREIGN KEY (session_id) REFERENCES chat_session(id) ON DELETE CASCADE
+) ENGINE = InnoDB COMMENT = '会话分析产物表';
+
 -- 用户Prompt配置表
 CREATE TABLE IF NOT EXISTS user_prompt_config (
   id VARCHAR(36) NOT NULL COMMENT '配置ID（UUID）',

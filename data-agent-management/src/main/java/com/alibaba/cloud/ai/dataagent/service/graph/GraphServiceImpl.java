@@ -16,6 +16,7 @@
 package com.alibaba.cloud.ai.dataagent.service.graph;
 
 import com.alibaba.cloud.ai.dataagent.dto.GraphRequest;
+import com.alibaba.cloud.ai.dataagent.entity.AnalysisArtifact;
 import com.alibaba.cloud.ai.dataagent.entity.ChatMessage;
 import com.alibaba.cloud.ai.dataagent.enums.ReasoningEffort;
 import com.alibaba.cloud.ai.dataagent.enums.TextType;
@@ -26,6 +27,7 @@ import com.alibaba.cloud.ai.dataagent.service.graph.Context.StreamContext;
 import com.alibaba.cloud.ai.dataagent.service.langfuse.LangfuseService;
 import com.alibaba.cloud.ai.dataagent.service.chat.ChatMessageService;
 import com.alibaba.cloud.ai.dataagent.service.chat.ChatSessionService;
+import com.alibaba.cloud.ai.dataagent.service.chat.AnalysisArtifactService;
 import com.alibaba.cloud.ai.dataagent.util.JsonUtil;
 import com.alibaba.cloud.ai.dataagent.vo.GraphNodeResponse;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -114,10 +116,13 @@ public class GraphServiceImpl implements GraphService {
 
 	private final ChatSessionService chatSessionService;
 
+	private final AnalysisArtifactService analysisArtifactService;
+
 	public GraphServiceImpl(StateGraph stateGraph, ExecutorService executorService,
 			MultiTurnContextManager multiTurnContextManager, ClarificationContextManager clarificationContextManager,
 			LangfuseService langfuseReporter, ChatMessageService chatMessageService,
-			ChatSessionService chatSessionService) throws GraphStateException {
+			ChatSessionService chatSessionService, AnalysisArtifactService analysisArtifactService)
+			throws GraphStateException {
 		this.compiledGraph = stateGraph.compile(CompileConfig.builder().interruptBefore(HUMAN_FEEDBACK_NODE).build());
 		this.executor = executorService;
 		this.multiTurnContextManager = multiTurnContextManager;
@@ -125,6 +130,7 @@ public class GraphServiceImpl implements GraphService {
 		this.langfuseReporter = langfuseReporter;
 		this.chatMessageService = chatMessageService;
 		this.chatSessionService = chatSessionService;
+		this.analysisArtifactService = analysisArtifactService;
 	}
 
 	@Override
@@ -158,6 +164,7 @@ public class GraphServiceImpl implements GraphService {
 		context.setThreadId(threadId);
 		context.setConversationId(graphRequest.getConversationId());
 		context.setMultiTurnContextId(getMultiTurnContextId(graphRequest));
+		context.setUserQuestion(graphRequest.getQuery());
 
 		if (StringUtils.hasText(graphRequest.getHumanFeedbackContent())) {
 			handleHumanFeedback(graphRequest);
@@ -396,10 +403,28 @@ public class GraphServiceImpl implements GraphService {
 			}
 		}
 		if (entries.isEmpty()) {
-			return "(无)";
+			entries.add("(无)");
+		}
+		AnalysisArtifact artifact = analysisArtifactService.findLatestSuccessful(request.getConversationId());
+		if (artifact != null) {
+			entries.add(buildArtifactContext(artifact));
 		}
 		int start = Math.max(0, entries.size() - 10);
 		return String.join("\n", entries.subList(start, entries.size()));
+	}
+
+	private String buildArtifactContext(AnalysisArtifact artifact) {
+		return """
+			最近可复用数据产物（ID: %s）：
+			原始问题: %s
+			执行SQL: %s
+			结果字段: %s
+			结果摘要: %s
+			结果样本: %s
+			展示配置: %s
+			追问规则：用户要求明细、筛选、分组、排序或改图表时，优先继承该产物的口径和过滤条件；仅改展示形式时不得重新扩大数据范围。
+			""".formatted(artifact.getId(), artifact.getUserQuestion(), artifact.getSqlQuery(), artifact.getResultSchema(),
+				artifact.getResultSummary(), artifact.getResultSample(), artifact.getPresentationSpec());
 	}
 
 	private String extractPlannerOutput(String timeline) {
@@ -592,6 +617,54 @@ public class GraphServiceImpl implements GraphService {
 		}
 	}
 
+	private void persistAnalysisArtifact(StreamContext context) {
+		String sessionId = context.getConversationId();
+		if (!StringUtils.hasText(sessionId) || !StringUtils.hasText(context.getUserQuestion())) {
+			return;
+		}
+		try {
+			String sql = null;
+			JsonNode result = null;
+			for (GraphNodeResponse response : context.getReplayResponsesAfter(0)) {
+				if (response.getTextType() == TextType.SQL && StringUtils.hasText(response.getText())) {
+					sql = response.getText();
+				}
+				else if (response.getTextType() == TextType.RESULT_SET && StringUtils.hasText(response.getText())) {
+					result = JsonUtil.getObjectMapper().readTree(response.getText());
+				}
+			}
+			if (!StringUtils.hasText(sql) || result == null) {
+				return;
+			}
+			JsonNode resultSet = result.path("resultSet");
+			JsonNode columns = resultSet.path("column");
+			JsonNode data = resultSet.path("data");
+			if (!columns.isArray() || !data.isArray()) {
+				return;
+			}
+			com.fasterxml.jackson.databind.node.ArrayNode sample = JsonUtil.getObjectMapper().createArrayNode();
+			for (int i = 0; i < Math.min(data.size(), 20); i++) {
+				sample.add(data.get(i));
+			}
+			AnalysisArtifact parent = analysisArtifactService.findLatestSuccessful(sessionId);
+			AnalysisArtifact artifact = AnalysisArtifact.builder()
+				.sessionId(sessionId)
+				.parentArtifactId(parent == null ? null : parent.getId())
+				.userQuestion(context.getUserQuestion())
+				.sqlQuery(sql)
+				.resultSchema(JsonUtil.getObjectMapper().writeValueAsString(columns))
+				.resultSample(JsonUtil.getObjectMapper().writeValueAsString(sample))
+				.resultSummary("{\"rowCount\":" + data.size() + ",\"sampleRowCount\":" + sample.size() + "}")
+				.presentationSpec(JsonUtil.getObjectMapper().writeValueAsString(result.path("displayStyle")))
+				.status("SUCCESS")
+				.build();
+			analysisArtifactService.save(artifact);
+		}
+		catch (Exception ex) {
+			log.warn("Failed to persist analysis artifact for session {}", sessionId, ex);
+		}
+	}
+
 	private void handleStreamComplete(String agentId, String threadId) {
 		log.info("Stream processing completed successfully for threadId: {}", threadId);
 		StreamContext context = streamContextMap.get(threadId);
@@ -605,6 +678,7 @@ public class GraphServiceImpl implements GraphService {
 				long now = System.currentTimeMillis();
 				emitFinalNodeTiming(context, agentId, threadId, now);
 				persistTimeline(context);
+				persistAnalysisArtifact(context);
 			if (context.getSpan() != null) {
 				langfuseReporter.endSpanSuccess(context.getSpan(), threadId, context.getCollectedOutput());
 			}
