@@ -50,6 +50,11 @@ public class ModelConfigOpsService {
 	public void updateAndRefresh(ModelConfigDTO dto) {
 		// 1. 更新数据库
 		ModelConfig entity = modelConfigDataService.updateConfigInDb(dto);
+		// 会话按配置 ID 缓存 ChatClient。配置更新后必须逐条失效，否则旧会话会继续
+		// 使用旧 Base URL、API Key 或模型参数。
+		if (ModelType.CHAT.equals(entity.getModelType())) {
+			aiModelRegistry.evictChatClient(entity.getId());
+		}
 
 		// 2. 检查是否是激活状态
 		if (Boolean.TRUE.equals(entity.getIsActive())) {

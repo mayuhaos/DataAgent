@@ -17,13 +17,18 @@ package com.alibaba.cloud.ai.dataagent.service.graph;
 
 import com.alibaba.cloud.ai.dataagent.dto.GraphRequest;
 import com.alibaba.cloud.ai.dataagent.entity.AnalysisArtifact;
+import com.alibaba.cloud.ai.dataagent.entity.ChatMessage;
+import com.alibaba.cloud.ai.dataagent.entity.ChatSession;
 import com.alibaba.cloud.ai.dataagent.service.graph.Context.ClarificationContextManager;
 import com.alibaba.cloud.ai.dataagent.service.graph.Context.MultiTurnContextManager;
+import com.alibaba.cloud.ai.dataagent.service.graph.Context.NodeTimingRegistry;
 import com.alibaba.cloud.ai.dataagent.service.langfuse.LangfuseService;
 import com.alibaba.cloud.ai.dataagent.service.chat.ChatMessageService;
 import com.alibaba.cloud.ai.dataagent.service.chat.ChatSessionService;
 import com.alibaba.cloud.ai.dataagent.service.chat.AnalysisArtifactService;
+import com.alibaba.cloud.ai.dataagent.service.conversation.AnalysisResultStore;
 import com.alibaba.cloud.ai.dataagent.vo.GraphNodeResponse;
+import com.alibaba.cloud.ai.dataagent.util.JsonUtil;
 import com.alibaba.cloud.ai.graph.CompiledGraph;
 import com.alibaba.cloud.ai.graph.OverAllState;
 import com.alibaba.cloud.ai.graph.RunnableConfig;
@@ -63,6 +68,7 @@ import static org.mockito.ArgumentMatchers.anyMap;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -93,6 +99,11 @@ class GraphServiceImplTest {
 	private AnalysisArtifactService analysisArtifactService;
 
 	@Mock
+	private AnalysisResultStore analysisResultStore;
+
+	private NodeTimingRegistry nodeTimingRegistry;
+
+	@Mock
 	private Span mockSpan;
 
 	private GraphServiceImpl graphService;
@@ -105,10 +116,11 @@ class GraphServiceImplTest {
 
 		StateGraph mockStateGraph = mock(StateGraph.class);
 		when(mockStateGraph.compile(any())).thenReturn(compiledGraph);
+		nodeTimingRegistry = new NodeTimingRegistry();
 
 		graphService = new GraphServiceImpl(mockStateGraph, executor, multiTurnContextManager,
 				clarificationContextManager, langfuseReporter, chatMessageService, chatSessionService,
-				analysisArtifactService);
+				analysisArtifactService, analysisResultStore, nodeTimingRegistry);
 
 		when(langfuseReporter.startLLMSpan(anyString(), any())).thenReturn(mockSpan);
 		when(mockSpan.isRecording()).thenReturn(true);
@@ -204,7 +216,7 @@ class GraphServiceImplTest {
 			.query("统计华东销售额")
 			.build();
 		String resultJson = "{\"resultSet\":{\"column\":[\"region\",\"amount\"],\"data\":[{\"region\":\"华东\",\"amount\":\"100\"}]},"
-				+ "\"displayStyle\":{\"type\":\"bar\",\"x\":\"region\",\"y\":[\"amount\"]}}";
+			+ "\"displayStyle\":{\"type\":\"bar\",\"x\":\"region\",\"y\":[\"amount\"]}}";
 		OverAllState state = mock(OverAllState.class);
 		when(compiledGraph.stream(anyMap(), any(RunnableConfig.class)))
 			.thenReturn(Flux.just(new StreamingOutput<>("$$$sql", "SqlExecuteNode", "", state),
@@ -256,13 +268,17 @@ class GraphServiceImplTest {
 	}
 
 	@Test
-	void graphStreamProcess_emitsNodeAndTotalTiming() throws InterruptedException {
+	void graphStreamProcess_emitsNodeAndTotalTiming() throws Exception {
 		GraphRequest request = GraphRequest.builder()
 			.agentId("1")
+			.conversationId("timing-session")
 			.threadId("timing-thread")
 			.query("test query")
 			.build();
 		OverAllState state = mock(OverAllState.class);
+		long nodeAStartedAt = System.currentTimeMillis() - TimeUnit.SECONDS.toMillis(5);
+		nodeTimingRegistry.recordNodeStart("timing-thread", "NodeA", nodeAStartedAt);
+		when(chatSessionService.findBySessionId("timing-session")).thenReturn(mock(ChatSession.class));
 		when(compiledGraph.stream(anyMap(), any(RunnableConfig.class)))
 			.thenReturn(Flux.just(new StreamingOutput<>("first", "NodeA", "", state),
 					new StreamingOutput<>("second", "NodeB", "", state)));
@@ -289,11 +305,27 @@ class GraphServiceImplTest {
 			.findFirst()
 			.orElseThrow();
 
-		assertNotNull(nodeATiming.getNodeStartedAt());
+		assertEquals(nodeAStartedAt, nodeATiming.getNodeStartedAt());
+		assertTrue(nodeATiming.getNodeElapsedMs() >= TimeUnit.SECONDS.toMillis(5));
 		assertNotNull(nodeATiming.getNodeElapsedMs());
 		assertNotNull(nodeBTiming.getNodeElapsedMs());
 		assertNotNull(completeResponse.getWorkflowStartedAt());
 		assertNotNull(completeResponse.getTotalElapsedMs());
+
+		org.mockito.ArgumentCaptor<ChatMessage> messageCaptor = org.mockito.ArgumentCaptor.forClass(ChatMessage.class);
+		verify(chatMessageService, atLeastOnce()).saveMessage(messageCaptor.capture());
+		ChatMessage timeline = messageCaptor.getAllValues()
+			.stream()
+			.filter(message -> "timeline".equals(message.getMessageType()))
+			.findFirst()
+			.orElseThrow();
+		long persistedElapsed = JsonUtil.getObjectMapper()
+			.readTree(timeline.getContent())
+			.path(0)
+			.path(0)
+			.path("nodeElapsedMs")
+			.asLong();
+		assertTrue(persistedElapsed >= TimeUnit.SECONDS.toMillis(5));
 	}
 
 	@Test

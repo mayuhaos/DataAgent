@@ -239,7 +239,6 @@ import ChatStreamingReport from './ChatStreamingReport.vue';
 
 const TIMELINE_ABSORBED_TYPES = new Set([
 	'result-set',
-	'markdown-report',
 	'html',
 ]);
 
@@ -261,9 +260,18 @@ const filteredMessages = computed<ChatMessage[]>(() => {
 	if (!msgs.length) return msgs;
 
 	const result: ChatMessage[] = [];
+	const displayedTimelineExecutions = new Set<string>();
 	for (let i = 0; i < msgs.length; i++) {
 		const msg = msgs[i];
 		if (!msg) continue;
+		if (msg.role === 'assistant' && msg.messageType === 'timeline') {
+			const executionKey = getTimelineExecutionKey(msg.content);
+			if (executionKey) {
+				const timelineKey = `${msg.sessionId}:${executionKey}`;
+				if (displayedTimelineExecutions.has(timelineKey)) continue;
+				displayedTimelineExecutions.add(timelineKey);
+			}
+		}
 		if (
 			msg.role === 'assistant' &&
 			TIMELINE_ABSORBED_TYPES.has(msg.messageType)
@@ -281,6 +289,24 @@ const filteredMessages = computed<ChatMessage[]>(() => {
 	}
 	return result;
 });
+
+function getTimelineExecutionKey(content: string): string | null {
+	try {
+		const blocks = JSON.parse(
+			content,
+		) as import('~/services/graph/index').GraphNodeResponse[][];
+		const firstResponse = blocks[0]?.[0];
+		if (
+			!firstResponse?.threadId ||
+			typeof firstResponse.workflowStartedAt !== 'number'
+		) {
+			return null;
+		}
+		return `${firstResponse.threadId}:${firstResponse.workflowStartedAt}`;
+	} catch {
+		return null;
+	}
+}
 
 const SANITIZE_OPTIONS = {
 	ADD_TAGS: ['div'],

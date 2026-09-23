@@ -24,6 +24,11 @@ public interface LlmService {
 
 	Flux<ChatResponse> call(String system, String user);
 
+	/** Calls a pinned chat-model configuration when the caller belongs to a conversation. */
+	default Flux<ChatResponse> call(String system, String user, Integer modelConfigId) {
+		return call(system, user);
+	}
+
 	Flux<ChatResponse> call(String system, String user, Class<?> outputType);
 
 	Flux<ChatResponse> callSystem(String system);

@@ -20,16 +20,17 @@ import org.apache.ibatis.annotations.Insert;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Select;
+import java.util.List;
 
 @Mapper
 public interface AnalysisArtifactMapper {
 
 	@Insert("""
 			INSERT INTO analysis_artifact
-			(id, session_id, parent_artifact_id, user_question, sql_query, result_schema,
-			 result_sample, result_summary, presentation_spec, status, create_time)
-			VALUES (#{id}, #{sessionId}, #{parentArtifactId}, #{userQuestion}, #{sqlQuery}, #{resultSchema},
-			        #{resultSample}, #{resultSummary}, #{presentationSpec}, #{status}, NOW())
+			(id, session_id, topic_id, parent_artifact_id, type, input_spec, user_question, sql_query, result_ref, content_ref,
+			 result_schema, result_sample, result_summary, presentation_spec, provenance, status, expire_time, create_time)
+			VALUES (#{id}, #{sessionId}, #{topicId}, #{parentArtifactId}, #{type}, #{inputSpec}, #{userQuestion}, #{sqlQuery}, #{resultRef}, #{contentRef},
+			        #{resultSchema}, #{resultSample}, #{resultSummary}, #{presentationSpec}, #{provenance}, #{status}, #{expireTime}, NOW())
 			""")
 	int insert(AnalysisArtifact artifact);
 
@@ -40,5 +41,22 @@ public interface AnalysisArtifactMapper {
 			LIMIT 1
 			""")
 	AnalysisArtifact selectLatestSuccessfulBySessionId(@Param("sessionId") String sessionId);
+
+	@Select("""
+			SELECT * FROM analysis_artifact
+			WHERE session_id = #{sessionId} AND topic_id = #{topicId} AND status = 'SUCCESS'
+			ORDER BY create_time DESC, id DESC LIMIT 1
+			""")
+	AnalysisArtifact selectLatestSuccessfulBySessionAndTopic(@Param("sessionId") String sessionId,
+			@Param("topicId") String topicId);
+
+	@Select("""
+			SELECT * FROM analysis_artifact WHERE session_id = #{sessionId}
+			ORDER BY create_time DESC, id DESC
+			""")
+	List<AnalysisArtifact> selectBySessionId(@Param("sessionId") String sessionId);
+
+	@Select("SELECT * FROM analysis_artifact WHERE id = #{id}")
+	AnalysisArtifact selectById(@Param("id") String id);
 
 }

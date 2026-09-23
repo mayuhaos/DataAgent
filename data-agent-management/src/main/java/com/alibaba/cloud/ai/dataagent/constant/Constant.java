@@ -30,6 +30,9 @@ public final class Constant {
 
 	public static final String AGENT_ID = "agentId";
 
+	/** Chat model configuration pinned to one conversation/run. */
+	public static final String CHAT_MODEL_CONFIG_ID = "CHAT_MODEL_CONFIG_ID";
+
 	public static final String DATASOURCE_ID = "datasourceId";
 
 	public static final String MULTI_TURN_CONTEXT = "MULTI_TURN_CONTEXT";

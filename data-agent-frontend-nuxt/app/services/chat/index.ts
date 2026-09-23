@@ -37,6 +37,8 @@ export interface ChatSession {
   isPinned: boolean;
   /** 用户 ID */
   userId?: number;
+  /** 会话锁定的对话模型配置 ID */
+  modelConfigId?: number;
   /** 创建时间 */
   createTime?: Date;
   /** 更新时间 */
@@ -88,10 +90,11 @@ class ChatService {
    * @param {number} [userId] - 用户 ID
    * @returns {Promise<ChatSession>} 创建成功的会话详情
    */
-  async createSession(agentId: number, title?: string, userId?: number): Promise<ChatSession> {
+  async createSession(agentId: number, title?: string, userId?: number, modelConfigId?: number): Promise<ChatSession> {
     const request = {
       title,
       userId,
+      modelConfigId,
     };
 
     const response = await axios.post<ChatSession>(
@@ -100,6 +103,15 @@ class ChatService {
     );
     return response.data;
   }
+
+	async updateSessionModel(sessionId: string, modelConfigId: number): Promise<ApiResponse> {
+		const response = await axios.put<ApiResponse>(
+			`${API_BASE_URL}/sessions/${sessionId}/model-config`,
+			null,
+			{ params: { modelConfigId } },
+		);
+		return response.data;
+	}
 
   /**
    * @description 清空指定智能体的所有会话

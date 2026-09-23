@@ -23,16 +23,20 @@ import com.alibaba.cloud.ai.dataagent.enums.TextType;
 import com.alibaba.cloud.ai.dataagent.service.graph.Context.ClarificationContextManager;
 import com.alibaba.cloud.ai.dataagent.service.graph.Context.ClarificationContextManager.ClarificationStateSnapshot;
 import com.alibaba.cloud.ai.dataagent.service.graph.Context.MultiTurnContextManager;
+import com.alibaba.cloud.ai.dataagent.service.graph.Context.NodeTimingRegistry;
 import com.alibaba.cloud.ai.dataagent.service.graph.Context.StreamContext;
 import com.alibaba.cloud.ai.dataagent.service.langfuse.LangfuseService;
 import com.alibaba.cloud.ai.dataagent.service.chat.ChatMessageService;
 import com.alibaba.cloud.ai.dataagent.service.chat.ChatSessionService;
 import com.alibaba.cloud.ai.dataagent.service.chat.AnalysisArtifactService;
+import com.alibaba.cloud.ai.dataagent.service.conversation.AnalysisResultStore;
 import com.alibaba.cloud.ai.dataagent.util.JsonUtil;
+import com.alibaba.cloud.ai.dataagent.util.SchemaSampleMasker;
 import com.alibaba.cloud.ai.dataagent.vo.GraphNodeResponse;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.alibaba.cloud.ai.dataagent.workflow.node.ClarificationNode;
 import com.alibaba.cloud.ai.dataagent.workflow.node.PlannerNode;
+import com.alibaba.cloud.ai.dataagent.workflow.node.ReportGeneratorNode;
 import com.alibaba.cloud.ai.graph.CompileConfig;
 import com.alibaba.cloud.ai.graph.CompiledGraph;
 import com.alibaba.cloud.ai.graph.NodeOutput;
@@ -51,7 +55,6 @@ import reactor.core.Disposable;
 import reactor.core.Exceptions;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Sinks;
-import reactor.util.retry.Retry;
 
 import java.util.HashMap;
 import java.util.List;
@@ -68,6 +71,7 @@ import java.util.concurrent.TimeUnit;
 
 import static com.alibaba.cloud.ai.dataagent.constant.Constant.AWAITING_CLARIFICATION;
 import static com.alibaba.cloud.ai.dataagent.constant.Constant.AGENT_ID;
+import static com.alibaba.cloud.ai.dataagent.constant.Constant.CHAT_MODEL_CONFIG_ID;
 import static com.alibaba.cloud.ai.dataagent.constant.Constant.CLARIFICATION_ANSWER;
 import static com.alibaba.cloud.ai.dataagent.constant.Constant.CLARIFICATION_COUNT;
 import static com.alibaba.cloud.ai.dataagent.constant.Constant.DATA_LINEAGE_SOURCES;
@@ -94,10 +98,6 @@ public class GraphServiceImpl implements GraphService {
 
 	private static final long RECONNECT_GRACE_PERIOD_SECONDS = 45;
 
-	private static final int MAX_MODEL_RETRIES = 6;
-
-	private static final Duration MODEL_RETRY_DELAY = Duration.ofSeconds(1);
-
 	private final CompiledGraph compiledGraph;
 
 	private final ExecutorService executor;
@@ -118,10 +118,15 @@ public class GraphServiceImpl implements GraphService {
 
 	private final AnalysisArtifactService analysisArtifactService;
 
+	private final AnalysisResultStore analysisResultStore;
+
+	private final NodeTimingRegistry nodeTimingRegistry;
+
 	public GraphServiceImpl(StateGraph stateGraph, ExecutorService executorService,
 			MultiTurnContextManager multiTurnContextManager, ClarificationContextManager clarificationContextManager,
 			LangfuseService langfuseReporter, ChatMessageService chatMessageService,
-			ChatSessionService chatSessionService, AnalysisArtifactService analysisArtifactService)
+			ChatSessionService chatSessionService, AnalysisArtifactService analysisArtifactService,
+			AnalysisResultStore analysisResultStore, NodeTimingRegistry nodeTimingRegistry)
 			throws GraphStateException {
 		this.compiledGraph = stateGraph.compile(CompileConfig.builder().interruptBefore(HUMAN_FEEDBACK_NODE).build());
 		this.executor = executorService;
@@ -131,6 +136,8 @@ public class GraphServiceImpl implements GraphService {
 		this.chatMessageService = chatMessageService;
 		this.chatSessionService = chatSessionService;
 		this.analysisArtifactService = analysisArtifactService;
+		this.analysisResultStore = analysisResultStore;
+		this.nodeTimingRegistry = nodeTimingRegistry;
 	}
 
 	@Override
@@ -163,6 +170,7 @@ public class GraphServiceImpl implements GraphService {
 		context.setAgentId(graphRequest.getAgentId());
 		context.setThreadId(threadId);
 		context.setConversationId(graphRequest.getConversationId());
+		context.setTopicId(graphRequest.getTopicId());
 		context.setMultiTurnContextId(getMultiTurnContextId(graphRequest));
 		context.setUserQuestion(graphRequest.getQuery());
 
@@ -212,6 +220,7 @@ public class GraphServiceImpl implements GraphService {
 			return false;
 		}
 		multiTurnContextManager.discardPending(getMultiTurnContextId(context));
+		nodeTimingRegistry.clear(threadId);
 		if (context.getSpan() != null && context.getSpan().isRecording()) {
 			langfuseReporter.endSpanSuccess(context.getSpan(), threadId, context.getCollectedOutput());
 		}
@@ -323,17 +332,19 @@ public class GraphServiceImpl implements GraphService {
 		String multiTurnContextId = getMultiTurnContextId(graphRequest);
 		String multiTurnContext = buildMultiTurnContext(graphRequest, multiTurnContextId);
 		multiTurnContextManager.beginTurn(multiTurnContextId, inputQuery);
+		Integer modelConfigId = chatSessionService.resolveModelConfigId(graphRequest.getConversationId());
 		Flux<NodeOutput> nodeOutputFlux = compiledGraph.stream(
 				buildInitialState(agentId, threadId, inputQuery, originalUserQuery, multiTurnContext, nl2sqlOnly,
 						humanReviewEnabled, clarificationCount, clarificationAnswer, graphRequest.getThinkingEnabled(),
-						graphRequest.getReasoningEffort()),
+						graphRequest.getReasoningEffort(), modelConfigId),
 				RunnableConfig.builder().threadId(threadId).build());
 		subscribeToFlux(context, nodeOutputFlux, graphRequest, agentId, threadId);
 	}
 
 	private Map<String, Object> buildInitialState(String agentId, String threadId, String inputQuery,
 			String originalUserQuery, String multiTurnContext, boolean nl2sqlOnly, boolean humanReviewEnabled,
-			int clarificationCount, String clarificationAnswer, Boolean thinkingEnabled, String reasoningEffort) {
+			int clarificationCount, String clarificationAnswer, Boolean thinkingEnabled, String reasoningEffort,
+			Integer modelConfigId) {
 		Map<String, Object> state = new HashMap<>();
 		state.put(IS_ONLY_NL2SQL, nl2sqlOnly);
 		if (thinkingEnabled != null) {
@@ -342,6 +353,9 @@ public class GraphServiceImpl implements GraphService {
 		}
 		state.put(INPUT_KEY, inputQuery);
 		state.put(AGENT_ID, agentId);
+		if (modelConfigId != null) {
+			state.put(CHAT_MODEL_CONFIG_ID, modelConfigId);
+		}
 		state.put(HUMAN_REVIEW_ENABLED, humanReviewEnabled);
 		state.put(MULTI_TURN_CONTEXT, multiTurnContext);
 		state.put(TRACE_THREAD_ID, threadId);
@@ -510,11 +524,7 @@ public class GraphServiceImpl implements GraphService {
 				log.debug("StreamContext cleaned before subscription for threadId: {}", threadId);
 				return;
 			}
-			Flux<NodeOutput> retryingFlux = nodeOutputFlux
-				.retryWhen(Retry.fixedDelay(MAX_MODEL_RETRIES, MODEL_RETRY_DELAY)
-					.doBeforeRetry(signal -> emitRetryStatus(context, agentId, threadId,
-							(int) signal.totalRetries() + 1, signal.failure())));
-			Disposable disposable = retryingFlux.subscribe(output -> handleNodeOutput(graphRequest, output),
+			Disposable disposable = nodeOutputFlux.subscribe(output -> handleNodeOutput(graphRequest, output),
 					error -> handleStreamError(agentId, threadId, error),
 					() -> handleStreamComplete(agentId, threadId));
 			synchronized (context) {
@@ -530,32 +540,6 @@ public class GraphServiceImpl implements GraphService {
 		}, executor);
 	}
 
-	private void emitRetryStatus(StreamContext context, String agentId, String threadId, int retryCount,
-			Throwable failure) {
-		if (context.isCleaned()) {
-			return;
-		}
-		// A retry starts a fresh model response; do not let the previous response's
-		// text marker (for example JSON or SQL) affect chunk classification.
-		context.setTextType(null);
-		String errorMessage = failure != null && StringUtils.hasText(failure.getMessage()) ? failure.getMessage()
-				: "模型调用失败";
-		GraphNodeResponse response = GraphNodeResponse.builder()
-				.agentId(agentId)
-				.threadId(threadId)
-				.text("模型调用失败，正在进行第 " + retryCount + " 次重试（共 6 次）\n错误：" + errorMessage)
-				.textType(TextType.TEXT)
-				.error(true)
-				.retrying(true)
-				.retryCount(retryCount)
-				.errorMessage(errorMessage)
-				.sequence(context.nextSequence())
-				.workflowStartedAt(context.getWorkflowStartedAt())
-				.totalElapsedMs(System.currentTimeMillis() - context.getWorkflowStartedAt())
-				.build();
-		emitDataResponse(context, response);
-	}
-
 	private void handleStreamError(String agentId, String threadId, Throwable error) {
 		log.error("Error in stream processing for threadId: {}: ", threadId, error);
 		Throwable rootError = Exceptions.unwrap(error);
@@ -565,13 +549,14 @@ public class GraphServiceImpl implements GraphService {
 		if (context != null && !context.isCleaned()) {
 			long now = System.currentTimeMillis();
 			emitFinalNodeTiming(context, agentId, threadId, now);
+			persistStreamFailure(context, errorMessage);
 			if (context.getSpan() != null) {
 				langfuseReporter.endSpanError(context.getSpan(), threadId,
 						rootError instanceof Exception ? (Exception) rootError : new RuntimeException(rootError));
 			}
 			if (context.getSink() != null && context.getSink().currentSubscriberCount() > 0) {
 				GraphNodeResponse errorResponse = GraphNodeResponse.error(agentId, threadId,
-						"模型调用失败（已重试 6 次）：" + errorMessage);
+						"任务执行失败：" + errorMessage);
 				errorResponse.setWorkflowStartedAt(context.getWorkflowStartedAt());
 				errorResponse.setTotalElapsedMs(now - context.getWorkflowStartedAt());
 				context.getSink()
@@ -582,6 +567,22 @@ public class GraphServiceImpl implements GraphService {
 				context.getSink().tryEmitComplete();
 			}
 			context.cleanup();
+			nodeTimingRegistry.clear(threadId);
+		}
+	}
+
+	private void persistStreamFailure(StreamContext context, String errorMessage) {
+		String sessionId = context.getConversationId();
+		if (!StringUtils.hasText(sessionId) || chatSessionService.findBySessionId(sessionId) == null) {
+			return;
+		}
+		String nodeName = StringUtils.hasText(context.getActiveNodeName()) ? context.getActiveNodeName() : "未知节点";
+		try {
+			chatMessageService.saveMessage(ChatMessage.builder().sessionId(sessionId).role("assistant")
+					.messageType("error").content("任务在 " + nodeName + " 失败：" + errorMessage).build());
+		}
+		catch (Exception ex) {
+			log.warn("Failed to persist stream failure for session {}", sessionId, ex);
 		}
 	}
 
@@ -596,7 +597,11 @@ public class GraphServiceImpl implements GraphService {
 			List<List<GraphNodeResponse>> blocks = new java.util.ArrayList<>();
 			List<GraphNodeResponse> current = null;
 			for (GraphNodeResponse response : context.getReplayResponsesAfter(0)) {
-				if (response.isTimingOnly() || response.getEventType() != com.alibaba.cloud.ai.dataagent.enums.GraphEventType.NODE_OUTPUT
+				if (response.isTimingOnly()) {
+					applyPersistedTiming(blocks, response);
+					continue;
+				}
+				if (response.getEventType() != com.alibaba.cloud.ai.dataagent.enums.GraphEventType.NODE_OUTPUT
 						|| !StringUtils.hasText(response.getText())) {
 					continue;
 				}
@@ -617,6 +622,39 @@ public class GraphServiceImpl implements GraphService {
 		}
 	}
 
+	private void applyPersistedTiming(List<List<GraphNodeResponse>> blocks, GraphNodeResponse timing) {
+		for (List<GraphNodeResponse> block : blocks) {
+			for (GraphNodeResponse target : block) {
+				if (!java.util.Objects.equals(target.getNodeName(), timing.getNodeName())
+						|| !java.util.Objects.equals(target.getNodeStartedAt(), timing.getNodeStartedAt())) {
+					continue;
+				}
+				target.setWorkflowStartedAt(timing.getWorkflowStartedAt());
+				target.setNodeElapsedMs(timing.getNodeElapsedMs());
+				target.setTotalElapsedMs(timing.getTotalElapsedMs());
+			}
+		}
+	}
+
+	/** Persist the user-visible report independently of the SSE subscriber. */
+	private void persistFinalReport(StreamContext context) {
+		String sessionId = context.getConversationId();
+		if (!StringUtils.hasText(sessionId) || chatSessionService.findBySessionId(sessionId) == null) {
+			return;
+		}
+		StringBuilder report = new StringBuilder();
+		for (GraphNodeResponse response : context.getReplayResponsesAfter(0)) {
+			if (ReportGeneratorNode.class.getSimpleName().equals(response.getNodeName())
+					&& response.getTextType() == TextType.MARK_DOWN && StringUtils.hasText(response.getText())) {
+				report.append(response.getText());
+			}
+		}
+		if (!report.isEmpty()) {
+			chatMessageService.saveMessage(ChatMessage.builder().sessionId(sessionId).role("assistant")
+					.messageType("markdown-report").content(report.toString()).build());
+		}
+	}
+
 	private void persistAnalysisArtifact(StreamContext context) {
 		String sessionId = context.getConversationId();
 		if (!StringUtils.hasText(sessionId) || !StringUtils.hasText(context.getUserQuestion())) {
@@ -625,12 +663,16 @@ public class GraphServiceImpl implements GraphService {
 		try {
 			String sql = null;
 			JsonNode result = null;
+			StringBuilder report = new StringBuilder();
 			for (GraphNodeResponse response : context.getReplayResponsesAfter(0)) {
 				if (response.getTextType() == TextType.SQL && StringUtils.hasText(response.getText())) {
 					sql = response.getText();
 				}
 				else if (response.getTextType() == TextType.RESULT_SET && StringUtils.hasText(response.getText())) {
 					result = JsonUtil.getObjectMapper().readTree(response.getText());
+				}
+				else if (response.getTextType() == TextType.MARK_DOWN && StringUtils.hasText(response.getText())) {
+					report.append(response.getText());
 				}
 			}
 			if (!StringUtils.hasText(sql) || result == null) {
@@ -644,25 +686,55 @@ public class GraphServiceImpl implements GraphService {
 			}
 			com.fasterxml.jackson.databind.node.ArrayNode sample = JsonUtil.getObjectMapper().createArrayNode();
 			for (int i = 0; i < Math.min(data.size(), 20); i++) {
-				sample.add(data.get(i));
+				sample.add(maskSampleRow(data.get(i)));
 			}
-			AnalysisArtifact parent = analysisArtifactService.findLatestSuccessful(sessionId);
+			AnalysisArtifact parent = analysisArtifactService.findLatestSuccessful(sessionId, context.getTopicId());
+			java.time.LocalDateTime expireTime = java.time.LocalDateTime.now().plusHours(1);
+			String resultRef = analysisResultStore.put(sessionId, data.toString(), Duration.ofHours(1));
 			AnalysisArtifact artifact = AnalysisArtifact.builder()
 				.sessionId(sessionId)
+				.topicId(context.getTopicId())
 				.parentArtifactId(parent == null ? null : parent.getId())
+				.type("QUERY_RESULT")
 				.userQuestion(context.getUserQuestion())
 				.sqlQuery(sql)
+				.resultRef(resultRef)
 				.resultSchema(JsonUtil.getObjectMapper().writeValueAsString(columns))
 				.resultSample(JsonUtil.getObjectMapper().writeValueAsString(sample))
 				.resultSummary("{\"rowCount\":" + data.size() + ",\"sampleRowCount\":" + sample.size() + "}")
 				.presentationSpec(JsonUtil.getObjectMapper().writeValueAsString(result.path("displayStyle")))
+				.expireTime(expireTime)
 				.status("SUCCESS")
 				.build();
 			analysisArtifactService.save(artifact);
+			if (!report.isEmpty()) {
+				AnalysisArtifact reportArtifact = AnalysisArtifact.builder().sessionId(sessionId).topicId(context.getTopicId())
+						.parentArtifactId(artifact.getId()).type("REPORT").inputSpec(artifact.getInputSpec())
+						.userQuestion(context.getUserQuestion()).resultRef(resultRef).resultSchema(artifact.getResultSchema())
+						.resultSummary(artifact.getResultSummary()).presentationSpec(artifact.getPresentationSpec())
+						.contentRef(analysisResultStore.put(sessionId, report.toString(), Duration.ofHours(1)))
+						.expireTime(expireTime).status("SUCCESS").build();
+				analysisArtifactService.save(reportArtifact);
+			}
 		}
 		catch (Exception ex) {
 			log.warn("Failed to persist analysis artifact for session {}", sessionId, ex);
 		}
+	}
+
+	private JsonNode maskSampleRow(JsonNode row) {
+		if (!row.isObject()) {
+			return row;
+		}
+		com.fasterxml.jackson.databind.node.ObjectNode masked = JsonUtil.getObjectMapper().createObjectNode();
+		row.fields().forEachRemaining(field -> {
+			java.util.List<String> values = SchemaSampleMasker.mask(field.getKey(),
+					java.util.List.of(field.getValue().asText()));
+			if (!values.isEmpty()) {
+				masked.put(field.getKey(), values.get(0));
+			}
+		});
+		return masked;
 	}
 
 	private void handleStreamComplete(String agentId, String threadId) {
@@ -678,6 +750,7 @@ public class GraphServiceImpl implements GraphService {
 				long now = System.currentTimeMillis();
 				emitFinalNodeTiming(context, agentId, threadId, now);
 				persistTimeline(context);
+				persistFinalReport(context);
 				persistAnalysisArtifact(context);
 			if (context.getSpan() != null) {
 				langfuseReporter.endSpanSuccess(context.getSpan(), threadId, context.getCollectedOutput());
@@ -696,6 +769,7 @@ public class GraphServiceImpl implements GraphService {
 				context.getSink().tryEmitComplete();
 			}
 			context.cleanup();
+			nodeTimingRegistry.clear(threadId);
 		}
 	}
 
@@ -769,11 +843,13 @@ public class GraphServiceImpl implements GraphService {
 		if (nodeName.equals(activeNodeName)) {
 			return;
 		}
+		Long recordedNodeStartedAt = nodeTimingRegistry.takeNodeStart(threadId, nodeName);
+		long nodeStartedAt = recordedNodeStartedAt != null ? recordedNodeStartedAt : now;
 		if (activeNodeName != null) {
-			emitNodeTiming(context, agentId, threadId, activeNodeName, context.getActiveNodeStartedAt(), now);
+			emitNodeTiming(context, agentId, threadId, activeNodeName, context.getActiveNodeStartedAt(), nodeStartedAt);
 		}
 		context.setActiveNodeName(nodeName);
-		context.setActiveNodeStartedAt(now);
+		context.setActiveNodeStartedAt(nodeStartedAt);
 	}
 
 	private void emitFinalNodeTiming(StreamContext context, String agentId, String threadId, long now) {

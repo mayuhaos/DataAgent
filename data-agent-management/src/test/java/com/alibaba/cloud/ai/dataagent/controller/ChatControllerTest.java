@@ -71,7 +71,7 @@ class ChatControllerTest {
 			.title("New Session")
 			.status("active")
 			.build();
-		when(chatSessionService.createSession(1, "New Session", null)).thenReturn(session);
+		when(chatSessionService.createSession(1, "New Session", null, null)).thenReturn(session);
 
 		ResponseEntity<ChatSession> result = chatController.createSession(1, Map.of("title", "New Session"));
 
@@ -83,7 +83,7 @@ class ChatControllerTest {
 	@Test
 	void createSession_nullBody_createsWithNulls() {
 		ChatSession session = ChatSession.builder().id("uuid-2").agentId(1).build();
-		when(chatSessionService.createSession(1, null, null)).thenReturn(session);
+		when(chatSessionService.createSession(1, null, null, null)).thenReturn(session);
 
 		ResponseEntity<ChatSession> result = chatController.createSession(1, null);
 

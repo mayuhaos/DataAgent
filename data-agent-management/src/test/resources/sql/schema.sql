@@ -158,6 +158,7 @@ CREATE TABLE IF NOT EXISTS chat_session (
   status VARCHAR(50) DEFAULT 'active' COMMENT '状态：active-活跃，archived-归档，deleted-已删除',
   is_pinned TINYINT DEFAULT 0 COMMENT '是否置顶：0-否，1-是',
   user_id BIGINT COMMENT '用户ID',
+  model_config_id INT COMMENT '会话锁定的对话模型配置ID',
   create_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   update_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (id),
@@ -185,6 +186,58 @@ CREATE TABLE IF NOT EXISTS chat_message (
   INDEX idx_create_time (create_time),
   FOREIGN KEY (session_id) REFERENCES chat_session(id) ON DELETE CASCADE
 ) ENGINE = InnoDB COMMENT = '聊天消息表';
+
+CREATE TABLE IF NOT EXISTS analysis_artifact (
+  id VARCHAR(36) NOT NULL,
+  session_id VARCHAR(36) NOT NULL,
+  topic_id VARCHAR(36),
+  parent_artifact_id VARCHAR(36),
+  type VARCHAR(32) NOT NULL DEFAULT 'QUERY_RESULT',
+  input_spec JSON,
+  user_question TEXT NOT NULL,
+  sql_query TEXT,
+  result_ref VARCHAR(512),
+  content_ref VARCHAR(512),
+  result_schema JSON,
+  result_sample JSON,
+  result_summary JSON,
+  presentation_spec JSON,
+  provenance JSON,
+  status VARCHAR(20) NOT NULL,
+  expire_time TIMESTAMP NULL,
+  create_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  INDEX idx_analysis_artifact_session_time (session_id, create_time),
+  FOREIGN KEY (session_id) REFERENCES chat_session(id) ON DELETE CASCADE
+) ENGINE = InnoDB COMMENT = '会话分析产物表';
+
+CREATE TABLE IF NOT EXISTS conversation_topic (
+  id VARCHAR(36) NOT NULL,
+  session_id VARCHAR(36) NOT NULL,
+  title VARCHAR(255) NOT NULL,
+  summary TEXT,
+  status VARCHAR(20) NOT NULL DEFAULT 'active',
+  create_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  update_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  INDEX idx_conversation_topic_session_time (session_id, update_time),
+  FOREIGN KEY (session_id) REFERENCES chat_session(id) ON DELETE CASCADE
+) ENGINE = InnoDB COMMENT = '会话语义主题表';
+
+CREATE TABLE IF NOT EXISTS conversation_audit (
+  id VARCHAR(36) NOT NULL,
+  session_id VARCHAR(36) NOT NULL,
+  thread_id VARCHAR(36) NOT NULL,
+  model_context_hash VARCHAR(64) NOT NULL,
+  operation_plan JSON NOT NULL,
+  validation_result VARCHAR(64) NOT NULL,
+  execution_mode VARCHAR(32) NOT NULL,
+  referenced_artifact_ids JSON,
+  create_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  INDEX idx_conversation_audit_session_time (session_id, create_time),
+  INDEX idx_conversation_audit_thread (thread_id)
+) ENGINE = InnoDB COMMENT = '多轮会话审计表';
 
 -- 用户Prompt配置表
 CREATE TABLE IF NOT EXISTS user_prompt_config (

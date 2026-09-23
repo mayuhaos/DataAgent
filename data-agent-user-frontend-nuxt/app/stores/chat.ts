@@ -101,6 +101,19 @@ export const useChatStore = defineStore('chat', () => {
 	const chatModels = ref<ModelConfig[]>([]);
 	const activeModelConfig = ref<ModelConfig | null>(null);
 
+	async function refreshChatModels() {
+		try {
+			const models = await modelConfigService.list();
+			chatModels.value = models.filter((m) => m.modelType === 'CHAT');
+			const active = chatModels.value.find((m) => m.isActive) || null;
+			activeModelConfig.value = active;
+			activeChatModel.value = active?.modelName || '';
+			if (active) applyModelThinkingDefaults(active);
+		} catch {
+			/* Keep the last known model list when a background refresh fails. */
+		}
+	}
+
 	// ── SSE session stream refs (not reactive) ──────────────────────────────────
 	let sessionEventSource: EventSource | null = null;
 	let sessionReconnectTimer: ReturnType<typeof setTimeout> | null = null;
@@ -194,18 +207,7 @@ export const useChatStore = defineStore('chat', () => {
 			/* ignore */
 		}
 		// Load chat models
-		try {
-			const models = await modelConfigService.list();
-			chatModels.value = models.filter((m) => m.modelType === 'CHAT');
-			const active = chatModels.value.find((m) => m.isActive);
-			if (active) {
-				activeModelConfig.value = active;
-				activeChatModel.value = active.modelName;
-				applyModelThinkingDefaults(active);
-			}
-		} catch {
-			/* ignore */
-		}
+		await refreshChatModels();
 	}
 
 	async function switchDatasource(ds: Datasource) {
@@ -239,14 +241,7 @@ export const useChatStore = defineStore('chat', () => {
 	async function switchModel(modelId: number) {
 		try {
 			await modelConfigService.activate(modelId);
-			const models = await modelConfigService.list();
-			chatModels.value = models.filter((m) => m.modelType === 'CHAT');
-			const active = chatModels.value.find((m) => m.isActive);
-			if (active) {
-				activeModelConfig.value = active;
-				activeChatModel.value = active.modelName;
-				applyModelThinkingDefaults(active);
-			}
+			await refreshChatModels();
 		} catch (e) {
 			console.error('切换模型失败', e);
 		}
@@ -459,12 +454,6 @@ export const useChatStore = defineStore('chat', () => {
 			titleNeeded: needsTitle,
 		};
 
-		const saved = await chatService.saveMessage(
-			currentSession.value.id,
-			userMessage,
-		);
-		currentMessages.value.push(saved);
-
 		const sessionState = getSessionState(currentSession.value.id);
 		const isClarificationReply = sessionState.awaitingClarification;
 		const previousClarificationCount = sessionState.clarificationCount;
@@ -478,13 +467,16 @@ export const useChatStore = defineStore('chat', () => {
 			reasoningEffort: requestOptions.value.reasoningEffort,
 			rejectedPlan: false,
 			humanFeedbackContent: undefined,
-			threadId: isClarificationReply ? sessionState.lastRequest?.threadId : undefined,
+			threadId: isClarificationReply
+				? sessionState.lastRequest?.threadId
+				: undefined,
 			clarificationAnswer: isClarificationReply ? query : undefined,
 			resumeMode: isClarificationReply ? 'clarification' : null,
 		};
 		if (isClarificationReply) {
 			resetClarificationState(sessionState);
 		}
+		currentMessages.value.push(userMessage);
 
 		await _sendGraphRequest(request, true, {
 			isClarificationReply,
@@ -654,9 +646,30 @@ export const useChatStore = defineStore('chat', () => {
 			persistSessionState(sessionId);
 		}
 
-		const closeStream = await graphService.streamSearch(
-			request,
+		const useConversationEntry =
+			request.sessionId &&
+			!options.isClarificationReply &&
+			!request.humanFeedback &&
+			!request.nl2sqlOnly;
+		const startStream = (
+			onMessage: (response: GraphNodeResponse) => Promise<void>,
+			onError: (error: Error) => Promise<void>,
+			onComplete: () => Promise<void>,
+		) =>
+			useConversationEntry
+				? graphService.streamConversation(
+						request.sessionId!,
+						request.query,
+						onMessage,
+						onError,
+						onComplete,
+					)
+				: graphService.streamSearch(request, onMessage, onError, onComplete);
+		const closeStream = await startStream(
 			async (response: GraphNodeResponse) => {
+				// ConversationPlan is routing metadata. It must not be rendered as a
+				// second assistant answer before the dispatched graph finishes.
+				if (response.nodeName === 'ConversationPlan') return;
 				if (response.retrying) {
 					if (currentSession.value?.id === sessionId) {
 						appendTransientAssistantMessage(
@@ -932,7 +945,9 @@ export const useChatStore = defineStore('chat', () => {
 
 		const threadId =
 			sessionState.threadId || sessionState.lastRequest?.threadId;
-		await graphService.stopStream(threadId, sessionId).catch((e) => console.error(e));
+		await graphService
+			.stopStream(threadId, sessionId)
+			.catch((e) => console.error(e));
 		sessionState.closeStream();
 		sessionState.closeStream = null;
 		sessionState.isStreaming = false;
@@ -1034,5 +1049,6 @@ export const useChatStore = defineStore('chat', () => {
 		downloadHtmlReport,
 		switchDatasource,
 		switchModel,
+		refreshChatModels,
 	};
 });

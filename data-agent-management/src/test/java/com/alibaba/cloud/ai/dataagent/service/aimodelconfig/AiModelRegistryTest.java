@@ -16,6 +16,7 @@
 package com.alibaba.cloud.ai.dataagent.service.aimodelconfig;
 
 import com.alibaba.cloud.ai.dataagent.dto.ModelConfigDTO;
+import com.alibaba.cloud.ai.dataagent.entity.ModelConfig;
 import com.alibaba.cloud.ai.dataagent.enums.ModelType;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -175,6 +176,28 @@ class AiModelRegistryTest {
 		registry.refreshChat();
 
 		registry.getChatClient();
+		verify(modelFactory, times(2)).createChatModel(any());
+	}
+
+	@Test
+	void evictChatClient_recreatesOnlyTheUpdatedPinnedClient() {
+		ModelConfig config = new ModelConfig();
+		config.setId(8);
+		config.setProvider("openai");
+		config.setApiKey("sk-test");
+		config.setBaseUrl("http://localhost:8080");
+		config.setModelName("gpt-4");
+		config.setModelType(ModelType.CHAT);
+		config.setTemperature(0.0);
+		config.setMaxTokens(8000);
+		when(modelConfigDataService.findById(8)).thenReturn(config);
+		when(modelFactory.createChatModel(any())).thenReturn(chatModel);
+
+		var first = registry.getChatClient(8);
+		registry.evictChatClient(8);
+		var second = registry.getChatClient(8);
+
+		assertNotSame(first, second);
 		verify(modelFactory, times(2)).createChatModel(any());
 	}
 

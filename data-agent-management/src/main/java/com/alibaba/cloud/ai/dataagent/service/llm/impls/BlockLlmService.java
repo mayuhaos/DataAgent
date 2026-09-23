@@ -18,6 +18,9 @@ package com.alibaba.cloud.ai.dataagent.service.llm.impls;
 import com.alibaba.cloud.ai.dataagent.service.aimodelconfig.AiModelRegistry;
 import com.alibaba.cloud.ai.dataagent.service.llm.LlmService;
 import lombok.AllArgsConstructor;
+import com.alibaba.cloud.ai.dataagent.util.StateUtil;
+import com.alibaba.cloud.ai.graph.OverAllState;
+import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.client.advisor.StructuredOutputValidationAdvisor;
 import org.springframework.ai.chat.model.ChatResponse;
 import reactor.core.publisher.Flux;
@@ -25,6 +28,7 @@ import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Schedulers;
 
 import static com.alibaba.cloud.ai.dataagent.util.ChatResponseUtil.hideThinkingProcess;
+import static com.alibaba.cloud.ai.dataagent.constant.Constant.CHAT_MODEL_CONFIG_ID;
 
 @AllArgsConstructor
 public class BlockLlmService implements LlmService {
@@ -36,6 +40,12 @@ public class BlockLlmService implements LlmService {
 		return hideThinkingProcess(Mono
 			.fromCallable(() -> registry.getChatClient().prompt().system(system).user(user).call().chatResponse())
 			.flux());
+	}
+
+	@Override
+	public Flux<ChatResponse> call(String system, String user, Integer modelConfigId) {
+		return hideThinkingProcess(Mono.fromCallable(() -> registry.getChatClient(modelConfigId).prompt().system(system)
+				.user(user).call().chatResponse()).flux());
 	}
 
 	@Override
@@ -77,6 +87,29 @@ public class BlockLlmService implements LlmService {
 		return hideThinkingProcess(Mono
 			.fromCallable(() -> registry.getChatClient().prompt().user(user).advisors(advisor).call().chatResponse())
 			.flux());
+	}
+
+	@Override
+	public Flux<ChatResponse> callWithState(String system, String user, OverAllState state) {
+		return hideThinkingProcess(Mono.fromCallable(() -> chatClient(state).prompt().system(system).user(user)
+				.call().chatResponse()).flux());
+	}
+
+	@Override
+	public Flux<ChatResponse> callSystemWithState(String system, OverAllState state) {
+		return hideThinkingProcess(Mono.fromCallable(() -> chatClient(state).prompt().system(system)
+				.call().chatResponse()).flux());
+	}
+
+	@Override
+	public Flux<ChatResponse> callUserWithState(String user, OverAllState state) {
+		return hideThinkingProcess(Mono.fromCallable(() -> chatClient(state).prompt().user(user)
+				.call().chatResponse()).flux());
+	}
+
+	private ChatClient chatClient(OverAllState state) {
+		return registry.getChatClient(
+				StateUtil.getObjectValue(state, CHAT_MODEL_CONFIG_ID, Integer.class, (Integer) null));
 	}
 
 }

@@ -31,6 +31,9 @@ public class GraphRequest {
 	/** Stable chat-memory conversation identifier. */
 	private String conversationId;
 
+	/** Semantic topic selected by the conversation orchestration layer. */
+	private String topicId;
+
 	/** Graph run identifier. Reused only when resuming human feedback. */
 	private String threadId;
 

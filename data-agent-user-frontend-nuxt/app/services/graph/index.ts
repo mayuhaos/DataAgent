@@ -74,6 +74,67 @@ export enum TextType {
 const API_BASE_URL = '/api';
 
 class GraphService {
+	async streamConversation(
+		sessionId: string,
+		userMessage: string,
+		onMessage: (response: GraphNodeResponse) => Promise<void>,
+		onError?: (error: Error) => Promise<void>,
+		onComplete?: () => Promise<void>,
+	): Promise<() => void> {
+		const controller = new AbortController();
+		let closedIntentionally = false;
+		void (async () => {
+			try {
+				const response = await fetch(
+					buildApiUrl(`${API_BASE_URL}/conversations/${sessionId}/messages`),
+					{
+						method: 'POST',
+						headers: {
+							'Content-Type': 'application/json',
+							Accept: 'text/event-stream',
+						},
+						body: JSON.stringify({ userMessage }),
+						signal: controller.signal,
+					},
+				);
+				if (!response.ok || !response.body) {
+					throw new Error(`Conversation request failed (${response.status})`);
+				}
+				const reader = response.body.getReader();
+				const decoder = new TextDecoder();
+				let buffer = '';
+				while (true) {
+					const { done, value } = await reader.read();
+					if (done) break;
+					buffer += decoder.decode(value, { stream: true });
+					const events = buffer.split(/\r?\n\r?\n/);
+					buffer = events.pop() || '';
+					for (const event of events) {
+						const data = event
+							.split(/\r?\n/)
+							.filter((line) => line.startsWith('data:'))
+							.map((line) => line.slice(5).trimStart())
+							.join('\n');
+						if (data) await onMessage(JSON.parse(data) as GraphNodeResponse);
+					}
+				}
+				if (!closedIntentionally && onComplete) await onComplete();
+			} catch (error) {
+				if (!closedIntentionally && onError) {
+					await onError(
+						error instanceof Error
+							? error
+							: new Error('Conversation stream failed'),
+					);
+				}
+			}
+		})();
+		return () => {
+			closedIntentionally = true;
+			controller.abort();
+		};
+	}
+
 	async streamSearch(
 		request: GraphRequest,
 		onMessage: (response: GraphNodeResponse) => Promise<void>,

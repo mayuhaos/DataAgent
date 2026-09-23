@@ -32,7 +32,7 @@ public interface ChatSessionService {
 	/**
 	 * Create a new session
 	 */
-	ChatSession createSession(Integer agentId, String title, Long userId);
+	ChatSession createSession(Integer agentId, String title, Long userId, Integer modelConfigId);
 
 	/**
 	 * Find session by id.
@@ -58,6 +58,10 @@ public interface ChatSessionService {
 	 * Rename session
 	 */
 	void renameSession(String sessionId, String newTitle);
+
+	void updateModelConfigId(String sessionId, Integer modelConfigId);
+
+	Integer resolveModelConfigId(String sessionId);
 
 	/**
 	 * Delete a single session

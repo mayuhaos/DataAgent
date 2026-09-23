@@ -17,6 +17,7 @@ package com.alibaba.cloud.ai.dataagent.service.aimodelconfig;
 
 import com.alibaba.cloud.ai.dataagent.enums.ModelType;
 import com.alibaba.cloud.ai.dataagent.dto.ModelConfigDTO;
+import com.alibaba.cloud.ai.dataagent.converter.ModelConfigConverter;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.client.ChatClient;
@@ -28,6 +29,8 @@ import org.springframework.ai.embedding.EmbeddingResponse;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
 
 @Slf4j
 @Component
@@ -40,6 +43,8 @@ public class AiModelRegistry {
 
 	// 缓存对象 (volatile 保证可见性)
 	private volatile ChatClient currentChatClient;
+
+	private final ConcurrentMap<Integer, ChatClient> chatClientsByConfigId = new ConcurrentHashMap<>();
 
 	private volatile EmbeddingModel currentEmbeddingModel;
 
@@ -72,6 +77,43 @@ public class AiModelRegistry {
 			}
 		}
 		return currentChatClient;
+	}
+
+	/**
+	 * Returns the client for a pinned configuration. These entries deliberately survive
+	 * {@link #refreshChat()} so a global model switch cannot change an in-flight run.
+	 */
+	public ChatClient getChatClient(Integer modelConfigId) {
+		if (modelConfigId == null) {
+			return getChatClient();
+		}
+		return chatClientsByConfigId.computeIfAbsent(modelConfigId, id -> {
+			var config = modelConfigDataService.findById(id);
+			if (config == null || config.getModelType() != ModelType.CHAT) {
+				throw new IllegalArgumentException("No CHAT model configuration found for id: " + id);
+			}
+			return ChatClient.builder(modelFactory.createChatModel(ModelConfigConverter.toDTO(config))).build();
+		});
+	}
+
+	/**
+	 * Creates an isolated client for a retry attempt. Streaming advisor chains retain
+	 * per-subscription state, so retry attempts must not share a cached ChatClient.
+	 */
+	public ChatClient createRequestChatClient(Integer modelConfigId) {
+		if (modelConfigId == null) {
+			ModelConfigDTO config = modelConfigDataService.getActiveConfigByType(ModelType.CHAT);
+			if (config == null) {
+				throw new IllegalStateException("No active CHAT model configured.");
+			}
+			return ChatClient.builder(modelFactory.createChatModel(config)).build();
+		}
+
+		var config = modelConfigDataService.findById(modelConfigId);
+		if (config == null || config.getModelType() != ModelType.CHAT) {
+			throw new IllegalArgumentException("No CHAT model configuration found for id: " + modelConfigId);
+		}
+		return ChatClient.builder(modelFactory.createChatModel(ModelConfigConverter.toDTO(config))).build();
 	}
 
 	// =========================================================
@@ -111,6 +153,18 @@ public class AiModelRegistry {
 	public void refreshChat() {
 		this.currentChatClient = null;
 		log.info("Chat cache cleared.");
+	}
+
+	/**
+	 * Evicts the client for one pinned configuration after that configuration changes.
+	 * Other conversations can continue using their own pinned model clients.
+	 */
+	public void evictChatClient(Integer modelConfigId) {
+		if (modelConfigId == null) {
+			return;
+		}
+		chatClientsByConfigId.remove(modelConfigId);
+		log.info("Chat client cache cleared for model configuration {}.", modelConfigId);
 	}
 
 	public void refreshEmbedding() {

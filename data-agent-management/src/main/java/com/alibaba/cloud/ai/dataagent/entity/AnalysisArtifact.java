@@ -28,7 +28,21 @@ public class AnalysisArtifact {
 
 	private String sessionId;
 
+	private String topicId;
+
 	private String parentArtifactId;
+
+	private String type;
+
+	private String inputSpec;
+
+	private String resultRef;
+
+	private String contentRef;
+
+	private String provenance;
+
+	private LocalDateTime expireTime;
 
 	private String userQuestion;
 

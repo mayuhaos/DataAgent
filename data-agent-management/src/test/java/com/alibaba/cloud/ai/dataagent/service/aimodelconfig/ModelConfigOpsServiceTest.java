@@ -55,6 +55,7 @@ class ModelConfigOpsServiceTest {
 	void testUpdateAndRefresh_activeChat() {
 		ModelConfigDTO dto = new ModelConfigDTO();
 		ModelConfig entity = new ModelConfig();
+		entity.setId(1);
 		entity.setIsActive(true);
 		entity.setModelType(ModelType.CHAT);
 		when(modelConfigDataService.updateConfigInDb(dto)).thenReturn(entity);
@@ -62,6 +63,7 @@ class ModelConfigOpsServiceTest {
 		service.updateAndRefresh(dto);
 
 		verify(aiModelRegistry).refreshChat();
+		verify(aiModelRegistry).evictChatClient(1);
 	}
 
 	@Test
@@ -88,6 +90,21 @@ class ModelConfigOpsServiceTest {
 
 		verify(aiModelRegistry, never()).refreshChat();
 		verify(aiModelRegistry, never()).refreshEmbedding();
+	}
+
+	@Test
+	void testUpdateAndRefresh_inactiveChatEvictsPinnedClient() {
+		ModelConfigDTO dto = new ModelConfigDTO();
+		ModelConfig entity = new ModelConfig();
+		entity.setId(8);
+		entity.setIsActive(false);
+		entity.setModelType(ModelType.CHAT);
+		when(modelConfigDataService.updateConfigInDb(dto)).thenReturn(entity);
+
+		service.updateAndRefresh(dto);
+
+		verify(aiModelRegistry).evictChatClient(8);
+		verify(aiModelRegistry, never()).refreshChat();
 	}
 
 	@Test

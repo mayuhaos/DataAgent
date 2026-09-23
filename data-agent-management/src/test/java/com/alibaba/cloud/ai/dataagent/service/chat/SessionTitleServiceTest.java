@@ -16,14 +16,14 @@
 package com.alibaba.cloud.ai.dataagent.service.chat;
 
 import com.alibaba.cloud.ai.dataagent.entity.ChatSession;
-import com.alibaba.cloud.ai.dataagent.service.llm.LlmService;
+import com.alibaba.cloud.ai.dataagent.service.aimodelconfig.AiModelRegistry;
+import com.alibaba.cloud.ai.dataagent.util.ChatResponseUtil;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.ai.chat.model.ChatResponse;
-import reactor.core.publisher.Flux;
+import org.springframework.ai.chat.client.ChatClient;
 
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -45,14 +45,28 @@ class SessionTitleServiceTest {
 	private SessionEventPublisher sessionEventPublisher;
 
 	@Mock
-	private LlmService llmService;
+	private AiModelRegistry aiModelRegistry;
+
+	@Mock
+	private ChatClient chatClient;
+
+	@Mock
+	private ChatClient.ChatClientRequestSpec requestSpec;
+
+	@Mock
+	private ChatClient.CallResponseSpec callResponseSpec;
 
 	private ExecutorService executorService;
 
 	@BeforeEach
 	void setUp() {
 		executorService = Executors.newSingleThreadExecutor();
-		service = new SessionTitleService(chatSessionService, sessionEventPublisher, llmService, executorService);
+		service = new SessionTitleService(chatSessionService, sessionEventPublisher, aiModelRegistry, executorService);
+		lenient().when(aiModelRegistry.createRequestChatClient(any())).thenReturn(chatClient);
+		lenient().when(chatClient.prompt()).thenReturn(requestSpec);
+		lenient().when(requestSpec.system(anyString())).thenReturn(requestSpec);
+		lenient().when(requestSpec.user(anyString())).thenReturn(requestSpec);
+		lenient().when(requestSpec.call()).thenReturn(callResponseSpec);
 	}
 
 	@Test
@@ -100,9 +114,7 @@ class SessionTitleServiceTest {
 		ChatSession session = ChatSession.builder().id("session-1").agentId(1).title("\u65b0\u4f1a\u8bdd").build();
 		when(chatSessionService.findBySessionId("session-1")).thenReturn(session);
 
-		Flux<ChatResponse> chatResponseFlux = Flux.empty();
-		when(llmService.call(anyString(), anyString())).thenReturn(chatResponseFlux);
-		when(llmService.toStringFlux(chatResponseFlux)).thenReturn(Flux.just("Generated", " Title"));
+		when(callResponseSpec.chatResponse()).thenReturn(ChatResponseUtil.createPureResponse("Generated Title"));
 
 		service.scheduleTitleGeneration("session-1", "hello world");
 		executorService.shutdown();
@@ -130,9 +142,7 @@ class SessionTitleServiceTest {
 			return null;
 		}).when(chatSessionService).renameSession(anyString(), anyString());
 
-		Flux<ChatResponse> chatResponseFlux = Flux.empty();
-		when(llmService.call(anyString(), anyString())).thenReturn(chatResponseFlux);
-		when(llmService.toStringFlux(chatResponseFlux)).thenReturn(Flux.just("Title"));
+		when(callResponseSpec.chatResponse()).thenReturn(ChatResponseUtil.createPureResponse("Title"));
 
 		service.scheduleTitleGeneration("session-1", "hello");
 		service.scheduleTitleGeneration("session-1", "hello again");

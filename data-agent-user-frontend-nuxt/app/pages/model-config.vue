@@ -504,6 +504,7 @@ const fetchConfigs = async () => {
 		const response = await modelConfigService.list();
 		console.log(response);
 		configs.value = response || [];
+		window.dispatchEvent(new Event('model-config-updated'));
 	} catch {
 		$tip('获取模型配置失败，请稍后重试', {
 			icon: 'mdi-alert-circle',
@@ -548,7 +549,7 @@ const submitConfig = async (isUpdate: boolean) => {
 		if (result.success) {
 			$tip(isUpdate ? '配置更新成功' : '配置创建成功');
 			closeDialog();
-			fetchConfigs();
+			await fetchConfigs();
 		} else {
 			$tip(result.message || '操作失败，请重试', {
 				icon: 'mdi-alert-circle',
@@ -585,7 +586,7 @@ const handleDelete = async (model: ModelConfig) => {
 			);
 			if (result.success) {
 				$tip('模型已删除');
-				fetchConfigs();
+				await fetchConfigs();
 			} else {
 				$tip(result.message || '删除失败', {
 					icon: 'mdi-alert-circle',
@@ -611,7 +612,7 @@ const handleActivate = async (model: ModelConfig) => {
 		const result = await modelConfigService.activate(model.id);
 		if (result.success) {
 			$tip('已设置为默认模型');
-			fetchConfigs();
+			await fetchConfigs();
 		} else {
 			$tip(result.message || '设置失败', {
 				icon: 'mdi-alert-circle',

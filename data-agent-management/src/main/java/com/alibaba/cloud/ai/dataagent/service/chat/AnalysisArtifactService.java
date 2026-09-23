@@ -16,11 +16,18 @@
 package com.alibaba.cloud.ai.dataagent.service.chat;
 
 import com.alibaba.cloud.ai.dataagent.entity.AnalysisArtifact;
+import java.util.List;
 
 public interface AnalysisArtifactService {
 
 	AnalysisArtifact save(AnalysisArtifact artifact);
 
 	AnalysisArtifact findLatestSuccessful(String sessionId);
+
+	AnalysisArtifact findLatestSuccessful(String sessionId, String topicId);
+
+	List<AnalysisArtifact> findBySessionId(String sessionId);
+
+	AnalysisArtifact findById(String id);
 
 }

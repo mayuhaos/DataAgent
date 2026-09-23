@@ -29,6 +29,12 @@ public class AnalysisArtifactServiceImpl implements AnalysisArtifactService {
 
 	@Override
 	public AnalysisArtifact save(AnalysisArtifact artifact) {
+		if (artifact.getType() == null) {
+			artifact.setType("QUERY_RESULT");
+		}
+		if (artifact.getStatus() == null) {
+			artifact.setStatus("SUCCESS");
+		}
 		artifact.setId(UUID.randomUUID().toString());
 		analysisArtifactMapper.insert(artifact);
 		return artifact;
@@ -37,6 +43,22 @@ public class AnalysisArtifactServiceImpl implements AnalysisArtifactService {
 	@Override
 	public AnalysisArtifact findLatestSuccessful(String sessionId) {
 		return analysisArtifactMapper.selectLatestSuccessfulBySessionId(sessionId);
+	}
+
+	@Override
+	public AnalysisArtifact findLatestSuccessful(String sessionId, String topicId) {
+		return topicId == null ? findLatestSuccessful(sessionId)
+				: analysisArtifactMapper.selectLatestSuccessfulBySessionAndTopic(sessionId, topicId);
+	}
+
+	@Override
+	public java.util.List<AnalysisArtifact> findBySessionId(String sessionId) {
+		return analysisArtifactMapper.selectBySessionId(sessionId);
+	}
+
+	@Override
+	public AnalysisArtifact findById(String id) {
+		return analysisArtifactMapper.selectById(id);
 	}
 
 }
