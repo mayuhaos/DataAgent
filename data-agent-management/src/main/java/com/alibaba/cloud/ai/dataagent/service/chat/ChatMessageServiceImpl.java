@@ -45,9 +45,52 @@ public class ChatMessageServiceImpl implements ChatMessageService {
 
 	@Override
 	public ChatMessage saveMessage(ChatMessage message) {
+		ChatMessage existingTimeline = findTimelineForSameThread(message);
+		if (existingTimeline != null) {
+			log.info("Skipping duplicate execution timeline for session: {}", message.getSessionId());
+			return existingTimeline;
+		}
 		chatMessageMapper.insert(message);
 		log.info("Saved message: {} for session: {}", message.getId(), message.getSessionId());
 		return message;
+	}
+
+	private ChatMessage findTimelineForSameThread(ChatMessage message) {
+		if (!"timeline".equals(message.getMessageType()) || !StringUtils.hasText(message.getSessionId())) {
+			return null;
+		}
+		String executionKey = timelineExecutionKey(message.getContent());
+		if (!StringUtils.hasText(executionKey)) {
+			return null;
+		}
+		List<ChatMessage> messages = chatMessageMapper.selectBySessionId(message.getSessionId());
+		if (messages == null) {
+			return null;
+		}
+		return messages.stream()
+			.filter(candidate -> "timeline".equals(candidate.getMessageType()))
+			.filter(candidate -> executionKey.equals(timelineExecutionKey(candidate.getContent())))
+			.findFirst()
+			.orElse(null);
+	}
+
+	private String timelineExecutionKey(String content) {
+		if (!StringUtils.hasText(content)) {
+			return null;
+		}
+		try {
+			JsonNode blocks = JsonUtil.getObjectMapper().readTree(content);
+			JsonNode firstResponse = blocks.path(0).path(0);
+			String threadId = firstResponse.path("threadId").asText(null);
+			JsonNode workflowStartedAt = firstResponse.path("workflowStartedAt");
+			if (!StringUtils.hasText(threadId) || !workflowStartedAt.isNumber()) {
+				return null;
+			}
+			return threadId + ":" + workflowStartedAt.asLong();
+		}
+		catch (Exception ex) {
+			return null;
+		}
 	}
 
 	@Override

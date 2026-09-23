@@ -16,7 +16,9 @@
 package com.alibaba.cloud.ai.dataagent.service.chat;
 
 import com.alibaba.cloud.ai.dataagent.entity.ChatSession;
+import com.alibaba.cloud.ai.dataagent.enums.ModelType;
 import com.alibaba.cloud.ai.dataagent.mapper.ChatSessionMapper;
+import com.alibaba.cloud.ai.dataagent.service.aimodelconfig.ModelConfigDataService;
 import lombok.AllArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.memory.ChatMemory;
@@ -35,6 +37,8 @@ public class ChatSessionServiceImpl implements ChatSessionService {
 
 	private final ChatMemory chatMemory;
 
+	private final ModelConfigDataService modelConfigDataService;
+
 	/**
 	 * Get session list by agent ID
 	 */
@@ -52,10 +56,11 @@ public class ChatSessionServiceImpl implements ChatSessionService {
 	 * Create a new session
 	 */
 	@Override
-	public ChatSession createSession(Integer agentId, String title, Long userId) {
+	public ChatSession createSession(Integer agentId, String title, Long userId, Integer modelConfigId) {
 		String sessionId = UUID.randomUUID().toString();
 
 		ChatSession session = new ChatSession(sessionId, agentId, title != null ? title : "新会话", "active", userId);
+		session.setModelConfigId(modelConfigId != null ? modelConfigId : getActiveChatModelConfigId());
 		chatSessionMapper.insert(session);
 
 		log.info("Created new chat session: {} for agent: {}", sessionId, agentId);
@@ -101,6 +106,37 @@ public class ChatSessionServiceImpl implements ChatSessionService {
 		LocalDateTime now = LocalDateTime.now();
 		chatSessionMapper.updateTitle(sessionId, newTitle, now);
 		log.info("Renamed session: {} to: {}", sessionId, newTitle);
+	}
+
+	@Override
+	public void updateModelConfigId(String sessionId, Integer modelConfigId) {
+		if (modelConfigId == null || modelConfigDataService.findById(modelConfigId) == null) {
+			throw new IllegalArgumentException("Chat model configuration does not exist");
+		}
+		chatSessionMapper.updateModelConfigId(sessionId, modelConfigId, LocalDateTime.now());
+	}
+
+	@Override
+	public Integer resolveModelConfigId(String sessionId) {
+		ChatSession session = chatSessionMapper.selectBySessionId(sessionId);
+		if (session == null) {
+			return null;
+		}
+		if (session.getModelConfigId() != null) {
+			return session.getModelConfigId();
+		}
+		Integer activeModelConfigId = getActiveChatModelConfigId();
+		if (activeModelConfigId == null) {
+			return null;
+		}
+		chatSessionMapper.lockModelConfigIdIfAbsent(sessionId, activeModelConfigId, LocalDateTime.now());
+		ChatSession lockedSession = chatSessionMapper.selectBySessionId(sessionId);
+		return lockedSession == null ? null : lockedSession.getModelConfigId();
+	}
+
+	private Integer getActiveChatModelConfigId() {
+		var activeConfig = modelConfigDataService.getActiveConfigByType(ModelType.CHAT);
+		return activeConfig == null ? null : activeConfig.getId();
 	}
 
 	/**

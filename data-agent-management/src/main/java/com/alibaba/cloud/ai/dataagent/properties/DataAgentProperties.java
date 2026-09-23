@@ -32,6 +32,12 @@ public class DataAgentProperties {
 	private LlmServiceEnum llmServiceType = LlmServiceEnum.STREAM;
 
 	/**
+	 * Maximum time without a response from one model request. Streaming responses reset
+	 * this timer for every received chunk.
+	 */
+	private Duration llmResponseTimeout = Duration.ofSeconds(120);
+
+	/**
 	 * spring.ai.alibaba.data-agent.embedding-batch.encoding-type=cl100k_base
 	 * spring.ai.alibaba.data-agent.embedding-batch.max-token-count=2000
 	 * spring.ai.alibaba.data-agent.embedding-batch.reserve-percentage=0.2

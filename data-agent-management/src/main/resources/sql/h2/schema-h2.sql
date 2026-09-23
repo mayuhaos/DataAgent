@@ -189,6 +189,7 @@ CREATE TABLE IF NOT EXISTS chat_session (
   status VARCHAR(50) DEFAULT 'active' COMMENT '状态：active-活跃，archived-归档，deleted-已删除',
   is_pinned TINYINT DEFAULT 0 COMMENT '是否置顶：0-否，1-是',
   user_id BIGINT COMMENT '用户ID',
+  model_config_id INT COMMENT '会话锁定的对话模型配置ID',
   create_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   update_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (id),
@@ -216,6 +217,59 @@ CREATE TABLE IF NOT EXISTS chat_message (
   INDEX idx_chat_message_create_time (create_time),
   FOREIGN KEY (session_id) REFERENCES chat_session(id) ON DELETE CASCADE
 ) ENGINE = InnoDB COMMENT = '聊天消息表';
+
+-- 每轮问数的可复用分析产物。仅保留有限样本，完整明细仍需按权限重新查询。
+CREATE TABLE IF NOT EXISTS analysis_artifact (
+  id VARCHAR(36) NOT NULL COMMENT '分析产物ID（UUID）',
+  session_id VARCHAR(36) NOT NULL COMMENT '所属会话ID',
+  topic_id VARCHAR(36) COMMENT '所属语义主题ID',
+  parent_artifact_id VARCHAR(36) COMMENT '本轮引用的上一分析产物',
+  type VARCHAR(32) NOT NULL DEFAULT 'QUERY_RESULT' COMMENT 'QUERY_RESULT/CHART/REPORT/ANSWER',
+  input_spec JSON COMMENT '结构化查询语义',
+  user_question TEXT NOT NULL COMMENT '本轮原始问题',
+  sql_query TEXT COMMENT '实际执行SQL',
+  result_ref VARCHAR(512) COMMENT '受控完整结果引用',
+  content_ref VARCHAR(512) COMMENT '报告或答案正文受控引用',
+  result_schema JSON COMMENT '结果字段',
+  result_sample JSON COMMENT '有限结果样本',
+  result_summary JSON COMMENT '结果摘要',
+  presentation_spec JSON COMMENT '图表或表格展示配置',
+  provenance JSON COMMENT '数据源、权限和脱敏版本',
+  status VARCHAR(20) NOT NULL COMMENT 'SUCCESS/ERROR',
+  expire_time TIMESTAMP NULL COMMENT 'result_ref 有效期',
+  create_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  PRIMARY KEY (id),
+  INDEX idx_analysis_artifact_session_time (session_id, create_time),
+  FOREIGN KEY (session_id) REFERENCES chat_session(id) ON DELETE CASCADE
+) ENGINE = InnoDB COMMENT = '会话分析产物表';
+
+CREATE TABLE IF NOT EXISTS conversation_topic (
+  id VARCHAR(36) NOT NULL COMMENT '会话主题ID',
+  session_id VARCHAR(36) NOT NULL COMMENT '所属会话ID',
+  title VARCHAR(255) NOT NULL COMMENT '主题标题',
+  summary TEXT COMMENT '受限长度滚动摘要',
+  status VARCHAR(20) NOT NULL DEFAULT 'active' COMMENT 'active/archived',
+  create_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  update_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  INDEX idx_conversation_topic_session_time (session_id, update_time),
+  FOREIGN KEY (session_id) REFERENCES chat_session(id) ON DELETE CASCADE
+) ENGINE = InnoDB COMMENT = '会话语义主题表';
+
+CREATE TABLE IF NOT EXISTS conversation_audit (
+  id VARCHAR(36) NOT NULL,
+  session_id VARCHAR(36) NOT NULL,
+  thread_id VARCHAR(36) NOT NULL,
+  model_context_hash VARCHAR(64) NOT NULL,
+  operation_plan JSON NOT NULL,
+  validation_result VARCHAR(64) NOT NULL,
+  execution_mode VARCHAR(32) NOT NULL,
+  referenced_artifact_ids JSON,
+  create_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  INDEX idx_conversation_audit_session_time (session_id, create_time),
+  INDEX idx_conversation_audit_thread (thread_id)
+) ENGINE = InnoDB COMMENT = '多轮会话审计表';
 
 -- 用户Prompt配置表
 CREATE TABLE IF NOT EXISTS user_prompt_config (

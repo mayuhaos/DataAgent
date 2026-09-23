@@ -105,6 +105,24 @@ public interface ChatSessionMapper {
 	int updateTitle(@Param("sessionId") String sessionId, @Param("title") String title,
 			@Param("updateTime") LocalDateTime updateTime);
 
+	@Update("""
+			UPDATE chat_session SET
+				model_config_id = #{modelConfigId},
+				update_time = #{updateTime}
+			WHERE id = #{sessionId}
+			""")
+	int updateModelConfigId(@Param("sessionId") String sessionId, @Param("modelConfigId") Integer modelConfigId,
+			@Param("updateTime") LocalDateTime updateTime);
+
+	@Update("""
+			UPDATE chat_session SET
+				model_config_id = #{modelConfigId},
+				update_time = #{updateTime}
+			WHERE id = #{sessionId} AND model_config_id IS NULL
+			""")
+	int lockModelConfigIdIfAbsent(@Param("sessionId") String sessionId,
+			@Param("modelConfigId") Integer modelConfigId, @Param("updateTime") LocalDateTime updateTime);
+
 	/**
 	 * Soft delete session
 	 */
@@ -116,8 +134,8 @@ public interface ChatSessionMapper {
 	int softDeleteById(@Param("sessionId") String sessionId, @Param("updateTime") LocalDateTime updateTime);
 
 	@Insert("""
-			INSERT INTO chat_session (id, agent_id, title, status, is_pinned, user_id, create_time, update_time)
-			VALUES (#{id}, #{agentId}, #{title}, #{status}, #{isPinned}, #{userId}, #{createTime}, #{updateTime})
+			INSERT INTO chat_session (id, agent_id, title, status, is_pinned, user_id, model_config_id, create_time, update_time)
+			VALUES (#{id}, #{agentId}, #{title}, #{status}, #{isPinned}, #{userId}, #{modelConfigId}, #{createTime}, #{updateTime})
 			""")
 	int insert(ChatSession session);
 

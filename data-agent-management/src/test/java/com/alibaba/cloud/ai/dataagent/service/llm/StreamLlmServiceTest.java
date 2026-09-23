@@ -35,11 +35,13 @@ import reactor.test.StepVerifier;
 
 import java.util.Optional;
 import java.util.Map;
+import java.util.concurrent.TimeoutException;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -66,6 +68,7 @@ class StreamLlmServiceTest {
 	@BeforeEach
 	void setUp() {
 		when(registry.getChatClient()).thenReturn(chatClient);
+		when(registry.createRequestChatClient(null)).thenReturn(chatClient);
 		when(chatClient.prompt()).thenReturn(requestSpec);
 		when(requestSpec.system(anyString())).thenReturn(requestSpec);
 		when(requestSpec.user(anyString())).thenReturn(requestSpec);
@@ -103,6 +106,33 @@ class StreamLlmServiceTest {
 		StepVerifier.create(result)
 			.expectNextMatches(r -> ChatResponseUtil.getText(r).equals("streamed output"))
 			.verifyComplete();
+	}
+
+	@Test
+	void retryRecreatesChatClientRequest() {
+		when(streamResponseSpec.chatResponse()).thenReturn(Flux.error(new TimeoutException("timed out")));
+		streamLlmService = new StreamLlmService(registry, java.time.Duration.ofMillis(10));
+
+		StepVerifier.create(streamLlmService.callUser("Hello"))
+			.expectErrorMatches(error -> error.getMessage().contains("Retries exhausted"))
+			.verify();
+
+		verify(registry).getChatClient();
+		verify(registry, times(2)).createRequestChatClient(null);
+	}
+
+	@Test
+	void doesNotRetryAfterReceivingAModelToken() {
+		when(streamResponseSpec.chatResponse()).thenReturn(
+				Flux.concat(Flux.just(mockResponse), Flux.error(new TimeoutException("timed out"))));
+
+		StepVerifier.create(streamLlmService.callUser("Hello"))
+			.expectNext(mockResponse)
+			.expectError(TimeoutException.class)
+			.verify();
+
+		verify(registry, times(1)).getChatClient();
+		verify(registry, times(0)).createRequestChatClient(null);
 	}
 
 	@Test

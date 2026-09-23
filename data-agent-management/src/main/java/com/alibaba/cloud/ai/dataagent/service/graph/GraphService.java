@@ -53,12 +53,12 @@ public interface GraphService {
 	 * 停止指定 threadId 的流式处理
 	 * @param threadId 线程ID
 	 */
-	void stopStreamProcessing(String threadId);
+	boolean stopStreamProcessing(String threadId);
 
 	/**
 	 * 停止指定会话当前仍在运行的图任务。用于客户端尚未收到 threadId 时的取消兜底。
 	 * @param conversationId 会话ID
 	 */
-	void stopStreamProcessingByConversationId(String conversationId);
+	boolean stopStreamProcessingByConversationId(String conversationId);
 
 }

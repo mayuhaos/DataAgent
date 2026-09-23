@@ -53,7 +53,7 @@ permissions and * limitations under the License. */
 							showModelMenu ? 'mdi-chevron-up' : 'mdi-chevron-down'
 						}}</v-icon>
 					</div>
-					<div v-if="showModelMenu" class="chip-dropdown">
+					<div v-if="showModelMenu" class="chip-dropdown chip-dropdown--model">
 						<div
 							v-for="m in store.chatModels"
 							:key="m.id"
@@ -261,7 +261,13 @@ function closeMenus() {
 }
 
 onMounted(() => document.addEventListener('click', closeMenus));
-onUnmounted(() => document.removeEventListener('click', closeMenus));
+onMounted(() => {
+		window.addEventListener('model-config-updated', store.refreshChatModels);
+});
+onUnmounted(() => {
+	document.removeEventListener('click', closeMenus);
+	window.removeEventListener('model-config-updated', store.refreshChatModels);
+});
 </script>
 
 <style scoped>
@@ -338,6 +344,13 @@ onUnmounted(() => document.removeEventListener('click', closeMenus));
 	max-height: 280px;
 	overflow-y: auto;
 	padding: 4px 0;
+}
+
+/* The input bar is anchored to the bottom of the viewport, so the model list
+ * must open upward to keep all configured models reachable. */
+.chip-dropdown--model {
+	top: auto;
+	bottom: calc(100% + 4px);
 }
 
 .chip-dropdown-item {

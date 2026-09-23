@@ -43,6 +43,9 @@ public class ChatSession {
 
 	private Long userId;
 
+	/** Chat model selected for this conversation. Null is supported for legacy sessions. */
+	private Integer modelConfigId;
+
 	private LocalDateTime createTime;
 
 	private LocalDateTime updateTime;

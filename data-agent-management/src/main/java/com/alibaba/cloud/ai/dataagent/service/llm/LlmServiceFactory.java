@@ -33,7 +33,7 @@ public class LlmServiceFactory {
 			return new BlockLlmService(aiModelRegistry);
 		}
 		else {
-			return new StreamLlmService(aiModelRegistry);
+			return new StreamLlmService(aiModelRegistry, properties.getLlmResponseTimeout());
 		}
 	}
 

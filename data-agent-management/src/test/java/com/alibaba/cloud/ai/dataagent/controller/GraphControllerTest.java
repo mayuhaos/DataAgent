@@ -32,6 +32,8 @@ import org.springframework.http.HttpHeaders;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Sinks;
 
+import java.util.Map;
+
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
@@ -129,6 +131,31 @@ class GraphControllerTest {
 		GraphRequest captured = requestCaptor.getValue();
 		assertEquals("华东区", captured.getClarificationAnswer());
 		assertEquals("clarification", captured.getResumeMode());
+	}
+
+	@Test
+	void stopStream_returnsWhetherTheActiveWorkflowWasCancelled() {
+		when(graphService.stopStreamProcessing("thread-4")).thenReturn(true);
+
+		assertEquals(Map.of("cancelled", true), graphController.stopStream("thread-4", null));
+		verify(graphService).stopStreamProcessing("thread-4");
+	}
+
+	@Test
+	void stopStream_canUseSessionIdWhenThreadIdIsNotAvailable() {
+		when(graphService.stopStreamProcessingByConversationId("session-4")).thenReturn(true);
+
+		assertEquals(Map.of("cancelled", true), graphController.stopStream(null, "session-4"));
+		verify(graphService).stopStreamProcessingByConversationId("session-4");
+	}
+
+	@Test
+	void stopStream_fallsBackToSessionIdWhenThreadIdDoesNotMatch() {
+		when(graphService.stopStreamProcessing("unknown-thread")).thenReturn(false);
+		when(graphService.stopStreamProcessingByConversationId("session-5")).thenReturn(true);
+
+		assertEquals(Map.of("cancelled", true), graphController.stopStream("unknown-thread", "session-5"));
+		verify(graphService).stopStreamProcessingByConversationId("session-5");
 	}
 
 }

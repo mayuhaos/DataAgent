@@ -141,11 +141,12 @@ permissions and * limitations under the License. */
 						</div>
 
 						<!-- ── Report card below completed timeline ────────── -->
-						<div
-							v-if="
-								message.messageType === 'timeline' &&
-								extractReportContent(message.content)
-							"
+		<div
+			v-if="
+				message.messageType === 'timeline' &&
+				!hasStandaloneReport(message.sessionId) &&
+				extractReportContent(message.content)
+			"
 							class="message-wrapper"
 						>
 							<div class="row ai-row">
@@ -267,7 +268,6 @@ import ChatStreamingReport from './ChatStreamingReport.vue';
 
 const TIMELINE_ABSORBED_TYPES = new Set([
 	'result-set',
-	'markdown-report',
 	'html',
 ]);
 
@@ -288,14 +288,64 @@ const streamingResultSets = computed(() =>
 	extractResultSetsFromBlocks(store.nodeBlocks),
 );
 
+const standaloneReportSessions = computed(() => {
+	const sessions = new Set<string>();
+	for (const message of store.currentMessages) {
+		if (
+			message.role === 'assistant' &&
+			message.messageType === 'markdown-report' &&
+			message.content.trim()
+		) {
+			sessions.add(message.sessionId);
+		}
+	}
+	return sessions;
+});
+
+function hasStandaloneReport(sessionId: string): boolean {
+	return standaloneReportSessions.value.has(sessionId);
+}
+
+const reportSessions = computed(() => {
+	const sessions = new Set(standaloneReportSessions.value);
+	for (const message of store.currentMessages) {
+		if (
+			message.role === 'assistant' &&
+			message.messageType === 'timeline' &&
+			extractReportContent(message.content)
+		) {
+			sessions.add(message.sessionId);
+		}
+	}
+	return sessions;
+});
+
 const filteredMessages = computed<ChatMessage[]>(() => {
 	const msgs = store.currentMessages;
 	if (!msgs.length) return msgs;
 
 	const result: ChatMessage[] = [];
+	const displayedTimelineExecutions = new Set<string>();
 	for (let i = 0; i < msgs.length; i++) {
 		const msg = msgs[i];
 		if (!msg) continue;
+		// A completed report is the canonical answer. The separate FINAL_ANSWER
+		// text message contains the same summary and would render a second answer.
+		if (
+			msg.role === 'assistant' &&
+			msg.messageType === 'text' &&
+			reportSessions.value.has(msg.sessionId)
+		) {
+			continue;
+		}
+		if (msg.role === 'assistant' && msg.messageType === 'timeline') {
+			const executionKey = getTimelineExecutionKey(msg.content);
+			if (executionKey) {
+				const timelineKey = `${msg.sessionId}:${executionKey}`;
+				if (displayedTimelineExecutions.has(timelineKey)) continue;
+				displayedTimelineExecutions.add(timelineKey);
+			}
+		}
 		if (
 			msg.role === 'assistant' &&
 			msg.messageType === 'result-set' &&
@@ -320,6 +370,27 @@ const filteredMessages = computed<ChatMessage[]>(() => {
 	}
 	return result;
 });
+
+function getTimelineExecutionKey(content: string): string | null {
+	try {
+		const blocks = JSON.parse(
+			content,
+		) as import('~/services/graph/index').GraphNodeResponse[][];
+		for (const block of blocks) {
+			for (const response of block) {
+				if (
+					response.threadId &&
+					typeof response.workflowStartedAt === 'number'
+				) {
+					return `${response.threadId}:${response.workflowStartedAt}`;
+				}
+			}
+		}
+	} catch {
+		return null;
+	}
+	return null;
+}
 
 const SANITIZE_OPTIONS = {
 	ADD_TAGS: ['div'],
@@ -395,12 +466,14 @@ function extractReportContent(timelineJson: string): string | null {
 			timelineJson,
 		) as import('~/services/graph/index').GraphNodeResponse[][];
 		for (const block of blocks) {
-			if (
-				block[0]?.nodeName === 'ReportGeneratorNode' &&
-				block[0]?.textType === 'MARK_DOWN' &&
-				block[0]?.text
-			) {
-				return block[0].text;
+			for (const response of block) {
+				if (
+					response.nodeName === 'ReportGeneratorNode' &&
+					response.textType === 'MARK_DOWN' &&
+					response.text.trim()
+				) {
+					return response.text;
+				}
 			}
 		}
 	} catch {

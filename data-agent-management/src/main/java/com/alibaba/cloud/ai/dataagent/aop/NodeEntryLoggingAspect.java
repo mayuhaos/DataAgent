@@ -16,12 +16,17 @@
 package com.alibaba.cloud.ai.dataagent.aop;
 
 import com.alibaba.cloud.ai.graph.OverAllState;
+import com.alibaba.cloud.ai.dataagent.service.graph.Context.NodeTimingRegistry;
+import com.alibaba.cloud.ai.dataagent.util.StateUtil;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.aspectj.lang.JoinPoint;
 import org.aspectj.lang.annotation.Aspect;
 import org.aspectj.lang.annotation.Before;
 import org.aspectj.lang.annotation.Pointcut;
 import org.springframework.stereotype.Component;
+
+import static com.alibaba.cloud.ai.dataagent.constant.Constant.TRACE_THREAD_ID;
 
 /**
  * AOP切面类，用于记录所有Node类的入口日志
@@ -31,7 +36,10 @@ import org.springframework.stereotype.Component;
 @Aspect
 @Component
 @Slf4j
+@RequiredArgsConstructor
 public class NodeEntryLoggingAspect {
+
+	private final NodeTimingRegistry nodeTimingRegistry;
 
 	@Pointcut("execution(* com.alibaba.cloud.ai.dataagent.workflow.node..*.apply(com.alibaba.cloud.ai.graph.OverAllState))")
 	public void nodeEntry() {
@@ -49,6 +57,8 @@ public class NodeEntryLoggingAspect {
 		// 获取方法参数并打印状态信息
 		Object[] args = joinPoint.getArgs();
 		if (args != null && args.length > 0 && args[0] instanceof OverAllState state) {
+			String threadId = StateUtil.getStringValue(state, TRACE_THREAD_ID, "");
+			nodeTimingRegistry.recordNodeStart(threadId, className, System.currentTimeMillis());
 			log.debug("State: {}", state);
 		}
 	}

@@ -17,6 +17,7 @@ package com.alibaba.cloud.ai.dataagent.service.chat;
 
 import com.alibaba.cloud.ai.dataagent.entity.ChatSession;
 import com.alibaba.cloud.ai.dataagent.mapper.ChatSessionMapper;
+import com.alibaba.cloud.ai.dataagent.service.aimodelconfig.ModelConfigDataService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -42,9 +43,12 @@ class ChatSessionServiceImplTest {
 	@Mock
 	private ChatMemory chatMemory;
 
+	@Mock
+	private ModelConfigDataService modelConfigDataService;
+
 	@BeforeEach
 	void setUp() {
-		service = new ChatSessionServiceImpl(chatSessionMapper, chatMemory);
+		service = new ChatSessionServiceImpl(chatSessionMapper, chatMemory, modelConfigDataService);
 	}
 
 	@Test
@@ -96,7 +100,7 @@ class ChatSessionServiceImplTest {
 		String title = "My Session";
 		Long userId = 100L;
 
-		ChatSession result = service.createSession(agentId, title, userId);
+		ChatSession result = service.createSession(agentId, title, userId, null);
 
 		assertNotNull(result);
 		assertNotNull(result.getId());
@@ -109,7 +113,7 @@ class ChatSessionServiceImplTest {
 
 	@Test
 	void createSession_withNullTitle_usesDefault() {
-		ChatSession result = service.createSession(1, null, 100L);
+		ChatSession result = service.createSession(1, null, 100L, null);
 
 		assertEquals("\u65b0\u4f1a\u8bdd", result.getTitle());
 		verify(chatSessionMapper).insert(any(ChatSession.class));

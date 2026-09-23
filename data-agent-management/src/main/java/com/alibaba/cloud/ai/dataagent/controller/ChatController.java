@@ -72,9 +72,12 @@ public class ChatController {
 	public ResponseEntity<ChatSession> createSession(@PathVariable(value = "id") Integer id,
 			@RequestBody(required = false) Map<String, Object> request) {
 		String title = request != null ? (String) request.get("title") : null;
-		Long userId = request != null ? (Long) request.get("userId") : null;
+		Long userId = request != null && request.get("userId") instanceof Number user
+				? user.longValue() : null;
+		Integer modelConfigId = request != null && request.get("modelConfigId") instanceof Number model
+				? model.intValue() : null;
 
-		ChatSession session = chatSessionService.createSession(id, title, userId);
+		ChatSession session = chatSessionService.createSession(id, title, userId, modelConfigId);
 		return ResponseEntity.ok(session);
 	}
 
@@ -178,6 +181,18 @@ public class ChatController {
 		catch (Exception e) {
 			log.error("Rename session error for session {}: {}", sessionId, e.getMessage(), e);
 			return ResponseEntity.internalServerError().body(ApiResponse.error("重命名失败"));
+		}
+	}
+
+	@PutMapping("/sessions/{sessionId}/model-config")
+	public ResponseEntity<ApiResponse> updateSessionModel(@PathVariable String sessionId,
+			@RequestParam Integer modelConfigId) {
+		try {
+			chatSessionService.updateModelConfigId(sessionId, modelConfigId);
+			return ResponseEntity.ok(ApiResponse.success("会话模型已更新"));
+		}
+		catch (IllegalArgumentException ex) {
+			return ResponseEntity.badRequest().body(ApiResponse.error(ex.getMessage()));
 		}
 	}
 

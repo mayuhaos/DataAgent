@@ -52,6 +52,16 @@ public class StreamContext {
 
 	private String conversationId;
 
+	private String topicId;
+
+	/**
+	 * Stable identifier used for multi-turn memory. It is the chat session when one
+	 * is supplied, otherwise the short-lived graph thread for backwards compatibility.
+	 */
+	private String multiTurnContextId;
+
+	private String userQuestion;
+
 	private final long workflowStartedAt = System.currentTimeMillis();
 
 	private String activeNodeName;

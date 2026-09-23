@@ -196,12 +196,7 @@ export const useChatStore = defineStore('chat', () => {
 		try {
 			const models = await modelConfigService.list();
 			chatModels.value = models.filter((m) => m.modelType === 'CHAT');
-			const active = chatModels.value.find((m) => m.isActive);
-			if (active) {
-				activeModelConfig.value = active;
-				activeChatModel.value = active.modelName;
-				applyModelThinkingDefaults(active);
-			}
+			applySessionModel(currentSession.value);
 		} catch {
 			/* ignore */
 		}
@@ -236,16 +231,13 @@ export const useChatStore = defineStore('chat', () => {
 	}
 
 	async function switchModel(modelId: number) {
+		if (!currentSession.value) return;
 		try {
-			await modelConfigService.activate(modelId);
-			const models = await modelConfigService.list();
-			chatModels.value = models.filter((m) => m.modelType === 'CHAT');
-			const active = chatModels.value.find((m) => m.isActive);
-			if (active) {
-				activeModelConfig.value = active;
-				activeChatModel.value = active.modelName;
-				applyModelThinkingDefaults(active);
-			}
+			await chatService.updateSessionModel(currentSession.value.id, modelId);
+			currentSession.value.modelConfigId = modelId;
+			const session = sessions.value.find((item) => item.id === currentSession.value?.id);
+			if (session) session.modelConfigId = modelId;
+			applySessionModel(currentSession.value);
 		} catch (e) {
 			console.error('切换模型失败', e);
 		}
@@ -256,8 +248,17 @@ export const useChatStore = defineStore('chat', () => {
 		requestOptions.value.reasoningEffort = model.reasoningEffort || 'high';
 	}
 
+	function applySessionModel(session: ChatSession | null) {
+		const model = chatModels.value.find((item) => item.id === session?.modelConfigId)
+			|| chatModels.value.find((item) => item.isActive)
+			|| null;
+		activeModelConfig.value = model;
+		activeChatModel.value = model?.modelName || '';
+		if (model) applyModelThinkingDefaults(model);
+	}
+
 	async function createNewSession(agentId: number) {
-		const newSession = await chatService.createSession(agentId, '新会话');
+		const newSession = await chatService.createSession(agentId, '新会话', undefined, activeModelConfig.value?.id);
 		sessions.value.unshift(newSession);
 		await selectSession(newSession);
 		return newSession;
@@ -347,6 +348,7 @@ export const useChatStore = defineStore('chat', () => {
 			});
 		}
 		currentSession.value = session;
+		applySessionModel(session);
 		syncStateToView(session.id, {
 			isStreaming,
 			isReportStreaming,
@@ -469,6 +471,7 @@ export const useChatStore = defineStore('chat', () => {
 		const previousClarificationCount = sessionState.clarificationCount;
 		const request: GraphRequest = {
 			agentId: String(currentAgentId.value || ''),
+			sessionId: currentSession.value.id,
 			query,
 			humanFeedback: requestOptions.value.humanFeedback,
 			nl2sqlOnly: requestOptions.value.nl2sqlOnly,
@@ -476,7 +479,7 @@ export const useChatStore = defineStore('chat', () => {
 			reasoningEffort: requestOptions.value.reasoningEffort,
 			rejectedPlan: false,
 			humanFeedbackContent: undefined,
-			threadId: sessionState.lastRequest?.threadId,
+			threadId: isClarificationReply ? sessionState.lastRequest?.threadId : undefined,
 			clarificationAnswer: isClarificationReply ? query : undefined,
 			resumeMode: isClarificationReply ? 'clarification' : null,
 		};
@@ -869,22 +872,8 @@ export const useChatStore = defineStore('chat', () => {
 					persistSessionState(sessionId);
 					if (currentSession.value?.id === sessionId) isStreaming.value = false;
 				} else {
-					if (sessionState.nodeBlocks.length > 0) {
-						const timelineMsg: ChatMessage = {
-							sessionId,
-							role: 'assistant',
-							content: JSON.stringify(sessionState.nodeBlocks),
-							messageType: 'timeline',
-						};
-						const savedTimeline = await chatService
-							.saveMessage(sessionId, timelineMsg)
-							.catch((e) => {
-								console.error(e);
-								return null;
-							});
-						if (savedTimeline && currentSession.value?.id === sessionId)
-							currentMessages.value.push(savedTimeline);
-					}
+					// The backend persists the complete execution timeline. Keeping it
+					// server-owned avoids recording the same SSE trace twice.
 					const finalAnswer = streamedFinalAnswerText.trim();
 					if (finalAnswer) {
 						const finalAnswerMsg: ChatMessage = {
@@ -944,9 +933,7 @@ export const useChatStore = defineStore('chat', () => {
 
 		const threadId =
 			sessionState.threadId || sessionState.lastRequest?.threadId;
-		if (threadId) {
-			await graphService.stopStream(threadId).catch((e) => console.error(e));
-		}
+		await graphService.stopStream(threadId, sessionId).catch((e) => console.error(e));
 		sessionState.closeStream();
 		sessionState.closeStream = null;
 		sessionState.isStreaming = false;

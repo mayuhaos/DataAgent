@@ -16,13 +16,16 @@
 package com.alibaba.cloud.ai.dataagent.service.chat;
 
 import com.alibaba.cloud.ai.dataagent.entity.ChatSession;
-import com.alibaba.cloud.ai.dataagent.service.llm.LlmService;
+import com.alibaba.cloud.ai.dataagent.service.aimodelconfig.AiModelRegistry;
+import com.alibaba.cloud.ai.dataagent.util.ChatResponseUtil;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
-import reactor.core.publisher.Flux;
+import reactor.core.publisher.Mono;
+import reactor.core.scheduler.Schedulers;
 
 import java.time.Duration;
 import java.util.Set;
@@ -44,7 +47,7 @@ public class SessionTitleService {
 
 	private final SessionEventPublisher sessionEventPublisher;
 
-	private final LlmService llmService;
+	private final AiModelRegistry aiModelRegistry;
 
 	@Qualifier("dbOperationExecutor")
 	private final ExecutorService executorService;
@@ -74,7 +77,7 @@ public class SessionTitleService {
 				return;
 			}
 
-			String title = requestSummary(userMessage);
+			String title = requestSummary(userMessage, session.getModelConfigId());
 			if (!StringUtils.hasText(title)) {
 				title = fallbackTitle(userMessage);
 			}
@@ -97,17 +100,19 @@ public class SessionTitleService {
 		return StringUtils.hasText(session.getTitle()) && !DEFAULT_TITLE.equals(session.getTitle());
 	}
 
-	private String requestSummary(String userMessage) {
+	private String requestSummary(String userMessage, Integer modelConfigId) {
 		try {
 			String systemPrompt = """
 					你是一名对话助手，请根据用户的第一条输入生成不超过20个字的会话标题。
 					使用中文输出，避免使用标点或引号，仅保留核心主题。
 					""";
 			String userPrompt = "用户输入：" + userMessage;
-			Flux<String> responseFlux = llmService.toStringFlux(llmService.call(systemPrompt, userPrompt));
-			return responseFlux.collect(StringBuilder::new, StringBuilder::append)
-				.map(StringBuilder::toString)
-				.block(Duration.ofSeconds(15));
+			ChatResponse response = Mono.fromCallable(() -> aiModelRegistry.createRequestChatClient(modelConfigId)
+				.prompt().system(systemPrompt).user(userPrompt).call().chatResponse())
+				.subscribeOn(Schedulers.boundedElastic())
+				.timeout(Duration.ofSeconds(5))
+				.block();
+			return ChatResponseUtil.getText(response);
 		}
 		catch (Exception ex) {
 			log.warn("LLM title generation failed: {}", ex.getMessage());

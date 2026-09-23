@@ -83,6 +83,8 @@ spring:
           artifact-format-columns: ${DATA_AGENT_LINEAGE_ARTIFACT_FORMAT_COLUMNS:artifact_format,source_format}
           ingestion-tool-columns: ${DATA_AGENT_LINEAGE_INGESTION_TOOL_COLUMNS:ingestion_tool}
         llm-service-type: stream
+        # A stalled provider request fails after this interval; every streaming chunk resets it.
+        llm-response-timeout: ${DATA_AGENT_LLM_RESPONSE_TIMEOUT:90s}
         code-executor:
           # 运行Python代码的环境（生产环境建议使用docker，不建议使用local）
           code-pool-executor: docker

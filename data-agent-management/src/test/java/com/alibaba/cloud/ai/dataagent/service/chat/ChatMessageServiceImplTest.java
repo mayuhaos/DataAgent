@@ -84,6 +84,37 @@ class ChatMessageServiceImplTest {
 	}
 
 	@Test
+	void saveMessage_doesNotInsertDuplicateTimelineForTheSameThread() {
+		String timeline = "[[{\"threadId\":\"thread-1\",\"workflowStartedAt\":100,\"nodeName\":\"PlannerNode\"}]]";
+		ChatMessage existing = ChatMessage.builder().id(1L).sessionId("session-1").role("assistant")
+			.messageType("timeline").content(timeline).build();
+		ChatMessage duplicate = ChatMessage.builder().sessionId("session-1").role("assistant")
+			.messageType("timeline").content(timeline).build();
+		when(chatMessageMapper.selectBySessionId("session-1")).thenReturn(List.of(existing));
+
+		ChatMessage result = service.saveMessage(duplicate);
+
+		assertSame(existing, result);
+		verify(chatMessageMapper, never()).insert(any());
+	}
+
+	@Test
+	void saveMessage_allowsDistinctExecutionsForTheSameThread() {
+		ChatMessage existing = ChatMessage.builder().id(1L).sessionId("session-1").role("assistant")
+			.messageType("timeline")
+			.content("[[{\"threadId\":\"thread-1\",\"workflowStartedAt\":100}]]").build();
+		ChatMessage laterExecution = ChatMessage.builder().sessionId("session-1").role("assistant")
+			.messageType("timeline")
+			.content("[[{\"threadId\":\"thread-1\",\"workflowStartedAt\":200}]]").build();
+		when(chatMessageMapper.selectBySessionId("session-1")).thenReturn(List.of(existing));
+
+		ChatMessage result = service.saveMessage(laterExecution);
+
+		assertSame(laterExecution, result);
+		verify(chatMessageMapper).insert(laterExecution);
+	}
+
+	@Test
 	void getExecutionResult_extractsOnlyExecutedSqlAndReportMarkdown() {
 		String timeline = """
 				[[
