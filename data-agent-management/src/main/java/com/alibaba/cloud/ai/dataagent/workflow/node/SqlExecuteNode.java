@@ -95,11 +95,6 @@ public class SqlExecuteNode implements NodeAction {
 
 		Integer currentStep = PlanProcessUtil.getCurrentStepNumber(state);
 
-		String sqlQuery = StateUtil.getStringValue(state, SQL_GENERATE_OUTPUT);
-		sqlQuery = nl2SqlService.sqlTrim(sqlQuery);
-
-		log.info("Executing SQL query: {}", sqlQuery);
-
 		// Get the agent ID from the state
 		String agentIdStr = StateUtil.getStringValue(state, Constant.AGENT_ID);
 		if (StringUtils.isBlank(agentIdStr)) {
@@ -110,6 +105,10 @@ public class SqlExecuteNode implements NodeAction {
 
 		// Dynamically get the data source configuration for an agent
 		DbConfigBO dbConfig = databaseUtil.getAgentDbConfig(agentId);
+		String sqlQuery = nl2SqlService.sqlTrim(StateUtil.getStringValue(state, SQL_GENERATE_OUTPUT),
+				dbConfig.getDialectType());
+
+		log.info("Executing SQL query: {}", sqlQuery);
 
 		return executeSqlQuery(state, currentStep, sqlQuery, dbConfig, agentId);
 	}
@@ -141,6 +140,13 @@ public class SqlExecuteNode implements NodeAction {
 
 		// 先返回流式数据，在执行数据库查询
 		Flux<ChatResponse> displayFlux = Flux.create(emitter -> {
+			if (StringUtils.isBlank(sqlQuery)) {
+				String errorMessage = "SQL生成结果不是可执行的只读查询，已拒绝提交数据源";
+				result.put(SQL_REGENERATE_REASON, SqlRetryDto.sqlExecute(errorMessage));
+				emitter.next(ChatResponseUtil.createResponse("SQL执行失败: " + errorMessage));
+				emitter.complete();
+				return;
+			}
 			emitter.next(ChatResponseUtil.createResponse("开始执行SQL..."));
 			emitter.next(ChatResponseUtil.createResponse("执行SQL查询："));
 			emitter.next(ChatResponseUtil.createPureResponse(TextType.SQL.getStartSign()));

@@ -138,7 +138,10 @@ export function useEchartsRenderer() {
 			element.removeAttribute('data-echarts-config');
 			element.dataset.echartsRendered = 'true';
 		} catch (error) {
-			console.error('ECharts rendering error:', error);
+			console.error('ECharts rendering error', {
+				message: error instanceof Error ? error.message : String(error),
+				configLength: code.length,
+			});
 			showChartError(element, error);
 		}
 	}

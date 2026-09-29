@@ -25,6 +25,8 @@ import com.alibaba.cloud.ai.graph.streaming.StreamingOutput;
 import com.alibaba.cloud.ai.dataagent.dto.planner.ExecutionStep;
 import com.alibaba.cloud.ai.dataagent.prompt.PromptConstant;
 import com.alibaba.cloud.ai.dataagent.service.llm.LlmService;
+import com.alibaba.cloud.ai.dataagent.service.quality.QualityAnalysisSpec;
+import com.alibaba.cloud.ai.dataagent.service.quality.QualitySkillPlanner;
 import com.alibaba.cloud.ai.dataagent.util.ChatResponseUtil;
 import com.alibaba.cloud.ai.dataagent.util.FluxUtil;
 import com.alibaba.cloud.ai.dataagent.util.MarkdownParserUtil;
@@ -34,6 +36,7 @@ import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.model.ChatResponse;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 import reactor.core.publisher.Flux;
 
@@ -61,10 +64,17 @@ public class PythonGenerateNode implements NodeAction {
 
 	private final LlmService llmService;
 
+	private QualitySkillPlanner qualitySkillPlanner;
+
 	public PythonGenerateNode(CodeExecutorProperties codeExecutorProperties, LlmService llmService) {
 		this.codeExecutorProperties = codeExecutorProperties;
 		this.llmService = llmService;
 		this.objectMapper = new ObjectMapper().setSerializationInclusion(JsonInclude.Include.NON_NULL);
+	}
+
+	@Autowired(required = false)
+	void setQualitySkillPlanner(QualitySkillPlanner qualitySkillPlanner) {
+		this.qualitySkillPlanner = qualitySkillPlanner;
 	}
 
 	@Override
@@ -99,6 +109,7 @@ public class PythonGenerateNode implements NodeAction {
 		ExecutionStep executionStep = PlanProcessUtil.getCurrentExecutionStep(state);
 
 		ExecutionStep.ToolParameters toolParameters = executionStep.getToolParameters();
+		QualityAnalysisSpec qualitySpec = planQualityAnalysis(userPrompt, sqlResults);
 
 		// Load Python code generation template
 		String systemPrompt = PromptConstant.getPythonGeneratorPromptTemplate()
@@ -124,7 +135,25 @@ public class PythonGenerateNode implements NodeAction {
 						pythonGenerateFlux,
 						Flux.just(ChatResponseUtil.createPureResponse(TextType.PYTHON.getEndSign()))));
 
+		if (qualitySpec != null) {
+			return Map.of(PYTHON_GENERATE_NODE_OUTPUT, generator, QUALITY_ANALYSIS_SPEC, qualitySpec.rawJson());
+		}
 		return Map.of(PYTHON_GENERATE_NODE_OUTPUT, generator);
+	}
+
+	private QualityAnalysisSpec planQualityAnalysis(String userPrompt, List<Map<String, String>> sqlResults) {
+		if (qualitySkillPlanner == null || sqlResults.isEmpty()) {
+			return null;
+		}
+		try {
+			QualityAnalysisSpec spec = qualitySkillPlanner.plan(userPrompt, sqlResults.get(0).keySet());
+			log.info("Quality Skill shadow plan selected mode={}, recipe={}", spec.mode(), spec.recipeId());
+			return spec;
+		}
+		catch (RuntimeException exception) {
+			log.warn("Quality Skill shadow planning failed; retaining existing Python path: {}", exception.getMessage());
+			return null;
+		}
 	}
 
 }

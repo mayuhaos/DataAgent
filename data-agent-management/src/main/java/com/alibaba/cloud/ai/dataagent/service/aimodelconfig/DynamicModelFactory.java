@@ -17,7 +17,6 @@ package com.alibaba.cloud.ai.dataagent.service.aimodelconfig;
 
 import com.alibaba.cloud.ai.dataagent.dto.ModelConfigDTO;
 import com.alibaba.cloud.ai.dataagent.enums.ChatApiProtocol;
-import com.alibaba.cloud.ai.dataagent.enums.ReasoningEffort;
 import com.alibaba.cloud.ai.dataagent.service.aimodelconfig.responses.ResponsesApi;
 import com.alibaba.cloud.ai.dataagent.service.aimodelconfig.responses.ResponsesApiChatModel;
 import lombok.RequiredArgsConstructor;
@@ -47,7 +46,6 @@ import org.springframework.web.reactive.function.client.WebClient;
 import reactor.netty.http.client.HttpClient;
 import reactor.netty.transport.ProxyProvider;
 
-import java.util.Map;
 
 @Slf4j
 @Service
@@ -91,8 +89,8 @@ public class DynamicModelFactory {
 			.model(config.getModelName())
 			.temperature(config.getTemperature())
 			.maxTokens(config.getMaxTokens())
-			.reasoningEffort(defaultReasoningEffort(config))
-			.extraBody(thinkingBody(config))
+			.reasoningEffort(ThinkingModeOptions.reasoningEffort(config, Boolean.TRUE.equals(config.getThinkingEnabled())))
+			.extraBody(ThinkingModeOptions.extraBody(config, Boolean.TRUE.equals(config.getThinkingEnabled())))
 			.build();
 
 		return new ResponsesApiChatModel(responsesApi, chatOptions);
@@ -120,26 +118,12 @@ public class DynamicModelFactory {
 			.model(config.getModelName())
 			.temperature(config.getTemperature())
 			.maxTokens(config.getMaxTokens())
-			.reasoningEffort(defaultReasoningEffort(config))
-			.extraBody(thinkingBody(config))
+			.reasoningEffort(ThinkingModeOptions.reasoningEffort(config, Boolean.TRUE.equals(config.getThinkingEnabled())))
+			.extraBody(ThinkingModeOptions.extraBody(config, Boolean.TRUE.equals(config.getThinkingEnabled())))
 			.streamUsage(true)
 			.build();
 		// 4. 返回统一的 OpenAiChatModel
 		return OpenAiChatModel.builder().openAiApi(openAiApi).defaultOptions(openAiChatOptions).build();
-	}
-
-	private String defaultReasoningEffort(ModelConfigDTO config) {
-		if (!Boolean.TRUE.equals(config.getThinkingEnabled())) {
-			return null;
-		}
-		return StringUtils.hasText(config.getReasoningEffort())
-				? ReasoningEffort.fromCode(config.getReasoningEffort()).getCode()
-				: ReasoningEffort.HIGH.getCode();
-	}
-
-	private Map<String, Object> thinkingBody(ModelConfigDTO config) {
-		String type = Boolean.TRUE.equals(config.getThinkingEnabled()) ? "enabled" : "disabled";
-		return Map.of("thinking", Map.of("type", type));
 	}
 
 	/**

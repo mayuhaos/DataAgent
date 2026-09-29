@@ -1,0 +1,30 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "skills": {
+    "paths": [
+      ".opencode/skills"
+    ]
+  },
+  "agent": {
+    "quality-python-planner": {
+      "mode": "primary",
+      "description": "Selects a registered quality-analysis recipe and returns a typed AnalysisSpec."
+    }
+  },
+  "model": "dataagent-quality/{env:DATA_AGENT_QUALITY_PROVIDER_MODEL_ID}",
+  "provider": {
+    "dataagent-quality": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "DataAgent Quality Provider",
+      "options": {
+        "baseURL": "{env:DATA_AGENT_QUALITY_PROVIDER_BASE_URL}",
+        "apiKey": "{env:DATA_AGENT_QUALITY_PROVIDER_API_KEY}"
+      },
+      "models": {
+        "{env:DATA_AGENT_QUALITY_PROVIDER_MODEL_ID}": {
+          "name": "DataAgent Quality Model"
+        }
+      }
+    }
+  }
+}

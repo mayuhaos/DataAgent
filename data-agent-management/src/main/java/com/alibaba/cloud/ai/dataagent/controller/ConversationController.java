@@ -29,6 +29,7 @@ import com.alibaba.cloud.ai.dataagent.vo.GraphNodeResponse;
 import com.alibaba.cloud.ai.dataagent.vo.AnalysisArtifactResponse;
 import jakarta.validation.Valid;
 import java.util.List;
+import lombok.extern.slf4j.Slf4j;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.codec.ServerSentEvent;
@@ -44,11 +45,19 @@ import org.springframework.http.MediaType;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Sinks;
 
+import java.time.Duration;
+
+import static com.alibaba.cloud.ai.dataagent.constant.Constant.STREAM_EVENT_COMPLETE;
+import static com.alibaba.cloud.ai.dataagent.constant.Constant.STREAM_EVENT_ERROR;
+
 @RestController
 @RequestMapping("/api")
 @CrossOrigin(origins = "*")
 @RequiredArgsConstructor
+@Slf4j
 public class ConversationController {
+
+	private static final Duration STREAM_HEARTBEAT_INTERVAL = Duration.ofSeconds(15);
 
 	private final ConversationService conversationService;
 	private final ConversationTopicService conversationTopicService;
@@ -77,14 +86,35 @@ public class ConversationController {
 					plan = plan.concatWithValues(ServerSentEvent.builder(report).event("message").build());
 				}
 			}
+			if (prepared.getMessage() != null && !prepared.getMessage().isBlank()) {
+				GraphNodeResponse localResult = GraphNodeResponse.builder().agentId(prepared.getAgentId())
+						.threadId(prepared.getThreadId()).nodeName("ConversationEdit")
+						.textType(com.alibaba.cloud.ai.dataagent.enums.TextType.FINAL_ANSWER)
+						.text(prepared.getMessage()).build();
+				plan = plan.concatWithValues(ServerSentEvent.builder(localResult).event("message").build());
+			}
 			GraphNodeResponse completion = GraphNodeResponse.complete(prepared.getAgentId(), prepared.getThreadId());
 			return plan.concatWithValues(ServerSentEvent.builder(completion).event("complete").build());
 		}
 		Sinks.Many<ServerSentEvent<GraphNodeResponse>> sink = Sinks.many().unicast().onBackpressureBuffer();
 		graphService.graphStreamProcess(sink, GraphRequest.builder().agentId(prepared.getAgentId())
 				.conversationId(sessionId).topicId(prepared.getTopicId()).threadId(prepared.getThreadId())
-				.query(request.getUserMessage()).build());
-		return plan.concatWith(sink.asFlux());
+				.query(request.getUserMessage()).scopeContext(request.getContext()).build());
+		Flux<ServerSentEvent<GraphNodeResponse>> eventStream = plan.concatWith(sink.asFlux());
+		Flux<ServerSentEvent<GraphNodeResponse>> heartbeatStream = Flux
+				.interval(STREAM_HEARTBEAT_INTERVAL, STREAM_HEARTBEAT_INTERVAL)
+				.map(sequence -> ServerSentEvent.<GraphNodeResponse>builder().comment("heartbeat").build());
+
+		return Flux.merge(eventStream, heartbeatStream)
+				.takeUntil(sse -> STREAM_EVENT_COMPLETE.equals(sse.event()) || STREAM_EVENT_ERROR.equals(sse.event()))
+				.doOnCancel(() -> {
+					log.info("Client disconnected from conversation stream, threadId: {}", prepared.getThreadId());
+					graphService.disconnectStream(prepared.getThreadId());
+				})
+				.doOnError(error -> {
+					log.error("Conversation stream failed, threadId: {}", prepared.getThreadId(), error);
+					graphService.disconnectStream(prepared.getThreadId());
+				});
 	}
 
 	private String toJson(ConversationMessageResponse response) {

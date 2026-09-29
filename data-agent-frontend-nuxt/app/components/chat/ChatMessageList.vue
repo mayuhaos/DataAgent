@@ -141,12 +141,12 @@ permissions and * limitations under the License. */
 						</div>
 
 						<!-- ── Report card below completed timeline ────────── -->
-		<div
-			v-if="
-				message.messageType === 'timeline' &&
-				!hasStandaloneReport(message.sessionId) &&
-				extractReportContent(message.content)
-			"
+						<div
+							v-if="
+								message.messageType === 'timeline' &&
+								!hasStandaloneReport(message.sessionId) &&
+								extractReportContent(message.content)
+							"
 							class="message-wrapper"
 						>
 							<div class="row ai-row">
@@ -266,10 +266,7 @@ import ChatMarkdownReport from './ChatMarkdownReport.vue';
 import ChatWorkflowTimeline from './ChatWorkflowTimeline.vue';
 import ChatStreamingReport from './ChatStreamingReport.vue';
 
-const TIMELINE_ABSORBED_TYPES = new Set([
-	'result-set',
-	'html',
-]);
+const TIMELINE_ABSORBED_TYPES = new Set(['result-set', 'html']);
 
 const store = useChatStore();
 const listRef = ref<HTMLElement | null>(null);
@@ -394,7 +391,7 @@ function getTimelineExecutionKey(content: string): string | null {
 
 const SANITIZE_OPTIONS = {
 	ADD_TAGS: ['div'],
-	ADD_ATTR: ['style', 'class'],
+	ADD_ATTR: ['style', 'class', 'data-echarts-config'],
 	RETURN_TRUSTED_TYPE: false as const,
 };
 

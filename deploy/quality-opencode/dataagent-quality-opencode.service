@@ -1,0 +1,20 @@
+[Unit]
+Description=DataAgent remote OpenCode quality Skills
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/dataagent-quality-skills/runtime
+EnvironmentFile=/etc/dataagent-quality-opencode.env
+ExecStart=/opt/opencode/bin/opencode serve --hostname 172.25.0.1 --port 4096
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ReadWritePaths=/opt/dataagent-quality-skills /root/.local/share/opencode
+
+[Install]
+WantedBy=multi-user.target

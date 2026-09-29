@@ -210,6 +210,24 @@ class Nl2SqlServiceImplTest {
 	}
 
 	@Test
+	void sqlTrim_extractsSqlAfterInstructionPrefix() {
+		String response = "注意：请严格按照上述要求输出SQL语句，不要输出任何解释或标记。\n\n"
+				+ "select `id`, `name` from `users` where `factory_id` = 1;";
+
+		assertEquals("select `id`, `name` from `users` where `factory_id` = 1;", nl2SqlService.sqlTrim(response));
+	}
+
+	@Test
+	void sqlTrim_rejectsNonSelectStatements() {
+		assertEquals("", nl2SqlService.sqlTrim("请执行 update users set name = 'x'"));
+	}
+
+	@Test
+	void sqlTrim_rejectsInvalidSql() {
+		assertEquals("", nl2SqlService.sqlTrim("select from users"));
+	}
+
+	@Test
 	void performSemanticConsistency_nullEvidence_buildsPrompt() {
 		SemanticConsistencyDTO dto = SemanticConsistencyDTO.builder()
 			.dialect("mysql")

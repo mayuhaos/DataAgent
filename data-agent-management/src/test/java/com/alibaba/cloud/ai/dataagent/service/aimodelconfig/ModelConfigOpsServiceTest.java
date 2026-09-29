@@ -115,8 +115,9 @@ class ModelConfigOpsServiceTest {
 
 		service.activateConfig(1);
 
-		verify(aiModelRegistry).refreshChat();
-		verify(modelConfigDataService).switchActiveStatus(1, ModelType.CHAT);
+		var inOrder = inOrder(modelConfigDataService, aiModelRegistry);
+		inOrder.verify(modelConfigDataService).switchActiveStatus(1, ModelType.CHAT);
+		inOrder.verify(aiModelRegistry).refreshChat();
 	}
 
 	@Test

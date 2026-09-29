@@ -49,6 +49,39 @@ class QueryEnhanceDispatcherTest {
 	}
 
 	@Test
+	void apply_incompleteChartEdit_routesToEarlyClarificationEvenWithValidEnhancedQuery() throws Exception {
+		OverAllState state = new OverAllState();
+		QueryEnhanceOutputDTO dto = TestFixtures.createQueryEnhanceDTO("查询历史遗留数据");
+		state.updateState(Map.of(
+				QUERY_ENHANCE_NODE_OUTPUT, dto,
+				ORIGINAL_USER_QUERY, "可以把上面这张图的 y"));
+
+		assertEquals(EARLY_CLARIFICATION_NODE, dispatcher.apply(state));
+	}
+
+	@Test
+	void apply_completeChartEdit_doesNotTriggerIncompleteGuard() throws Exception {
+		OverAllState state = new OverAllState();
+		QueryEnhanceOutputDTO dto = TestFixtures.createQueryEnhanceDTO("查询历史遗留数据");
+		state.updateState(Map.of(
+				QUERY_ENHANCE_NODE_OUTPUT, dto,
+				ORIGINAL_USER_QUERY, "把图表 01 的 Y 轴上限改为 150"));
+
+		assertEquals(SCHEMA_RECALL_NODE, dispatcher.apply(state));
+	}
+
+	@Test
+	void apply_dataFilterDoesNotTriggerIncompleteGuard() throws Exception {
+		OverAllState state = new OverAllState();
+		QueryEnhanceOutputDTO dto = TestFixtures.createQueryEnhanceDTO("只保留小于 150 的记录");
+		state.updateState(Map.of(
+				QUERY_ENHANCE_NODE_OUTPUT, dto,
+				ORIGINAL_USER_QUERY, "只保留小于 150 的记录"));
+
+		assertEquals(SCHEMA_RECALL_NODE, dispatcher.apply(state));
+	}
+
+	@Test
 	void apply_emptyCanonicalQuery_routesToEnd() throws Exception {
 		OverAllState state = new OverAllState();
 		QueryEnhanceOutputDTO dto = new QueryEnhanceOutputDTO();

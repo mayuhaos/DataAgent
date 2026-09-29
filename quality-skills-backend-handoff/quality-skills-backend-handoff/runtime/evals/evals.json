@@ -1,0 +1,47 @@
+{
+  "skill_name": "quality-python",
+  "evals": [
+    {
+      "id": "dimension-variation",
+      "prompt": "对一厂某日期的尺寸测量明细，按产品和测量点位计算极差、标准差和公差带占比；样本达到125时增加Cpk和Ppk。",
+      "expected_output": "A recipe-mode AnalysisSpec selecting dimension_variation_v1 with explicit columns and supplied rule values.",
+      "files": []
+    },
+    {
+      "id": "spray-weekly-yield",
+      "prompt": "按周统计2026年6月喷涂合格率趋势，使用检查总数和合格数计算，不平均每天的合格率。",
+      "expected_output": "A recipe-mode AnalysisSpec selecting tabular_aggregate_v1 with week grouping, total aggregates, yield ratio, and trend.",
+      "files": []
+    },
+    {
+      "id": "spray-defect-top3-share",
+      "prompt": "2026年6月喷涂表格的缺陷 TOP3 数量分别占总缺陷数量比是多少。",
+      "expected_output": "A recipe-mode AnalysisSpec selecting tabular_aggregate_v1 with defect_name grouping, defect total, full-set share, descending sort, and limit 3.",
+      "files": []
+    },
+    {
+      "id": "spray-three-defect-categories",
+      "prompt": "对比2026年6月喷涂表格的塑件缺陷、喷房缺陷和设备环境三类不良数。",
+      "expected_output": "A recipe-mode AnalysisSpec selecting tabular_aggregate_v1 with category grouping and defect-count summation.",
+      "files": []
+    },
+    {
+      "id": "spray-shift-defect-rate",
+      "prompt": "基于2026年6月喷涂报表的白夜班缺陷不良率比对。",
+      "expected_output": "A recipe-mode AnalysisSpec selecting tabular_aggregate_v1 with shift grouping and a weighted ng_total/check_total ratio.",
+      "files": []
+    },
+    {
+      "id": "spray-source-overall-pass-rate",
+      "prompt": "2026年6月喷涂报表的产品总合格率。",
+      "expected_output": "A recipe-mode AnalysisSpec selecting tabular_aggregate_v1 without deriving or averaging overall_pass_rate; the application validates source-metric consistency before execution.",
+      "files": []
+    },
+    {
+      "id": "unsupported-causal-analysis",
+      "prompt": "根据喷涂和尺寸的历史数据自动判断造成缺陷的唯一根本原因，并给出工艺调参方案。",
+      "expected_output": "A legacy-mode response explaining that causal diagnosis and parameter recommendation are not registered recipes.",
+      "files": []
+    }
+  ]
+}

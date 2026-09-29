@@ -1,0 +1,9 @@
+{
+  "candidate_fraction": 0.15,
+  "range_ratio_high": 0.5,
+  "range_ratio_medium": 0.3,
+  "std_divisor": 6,
+  "minimum_cpk_samples": 125,
+  "cpk_threshold": 1.33,
+  "trend_slope_factor": 0.5
+}

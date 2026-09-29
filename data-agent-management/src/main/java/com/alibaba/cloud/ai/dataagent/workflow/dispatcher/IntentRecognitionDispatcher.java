@@ -22,6 +22,7 @@ import com.alibaba.cloud.ai.dataagent.util.StateUtil;
 import lombok.extern.slf4j.Slf4j;
 
 import static com.alibaba.cloud.ai.dataagent.constant.Constant.EVIDENCE_RECALL_NODE;
+import static com.alibaba.cloud.ai.dataagent.constant.Constant.EARLY_CLARIFICATION_NODE;
 import static com.alibaba.cloud.ai.dataagent.constant.Constant.INTENT_RECOGNITION_NODE_OUTPUT;
 import static com.alibaba.cloud.ai.graph.StateGraph.END;
 
@@ -49,6 +50,10 @@ public class IntentRecognitionDispatcher implements EdgeAction {
 		if ("《闲聊或无关指令》".equals(classification)) {
 			log.warn("Intent classified as chat or irrelevant, ending conversation");
 			return END;
+		}
+		else if ("《需要澄清》".equals(classification)) {
+			log.info("Intent requires clarification, bypassing retrieval and query enhancement");
+			return EARLY_CLARIFICATION_NODE;
 		}
 		else {
 			log.info("Intent classified as potential data analysis request, proceeding to evidence recall");

@@ -16,6 +16,7 @@
 package com.alibaba.cloud.ai.dataagent.service.llm;
 
 import com.alibaba.cloud.ai.dataagent.service.aimodelconfig.AiModelRegistry;
+import com.alibaba.cloud.ai.dataagent.dto.ModelConfigDTO;
 import com.alibaba.cloud.ai.dataagent.service.llm.impls.StreamLlmService;
 import com.alibaba.cloud.ai.dataagent.util.ChatResponseUtil;
 import org.junit.jupiter.api.BeforeEach;
@@ -160,6 +161,20 @@ class StreamLlmServiceTest {
 		verify(requestSpec).options(captor.capture());
 		assertNull(captor.getValue().getReasoningEffort());
 		assertEquals("disabled", thinkingType(captor.getValue()));
+	}
+
+	@Test
+	void callUser_withQwenThinkingState_usesDashScopeParameter() {
+		OverAllState state = org.mockito.Mockito.mock(OverAllState.class);
+		when(state.value("THINKING_ENABLED")).thenReturn(Optional.of(false));
+		when(registry.getChatModelConfig(null)).thenReturn(ModelConfigDTO.builder().provider("qwen").build());
+
+		streamLlmService.callUserWithState("Hello", state).blockLast();
+
+		ArgumentCaptor<OpenAiChatOptions> captor = ArgumentCaptor.forClass(OpenAiChatOptions.class);
+		verify(requestSpec).options(captor.capture());
+		assertEquals(false, captor.getValue().getExtraBody().get("enable_thinking"));
+		assertNull(captor.getValue().getReasoningEffort());
 	}
 
 	@SuppressWarnings("unchecked")

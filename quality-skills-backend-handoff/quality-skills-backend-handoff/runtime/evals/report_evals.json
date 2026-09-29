@@ -1,0 +1,35 @@
+{
+  "skill_name": "quality-report",
+  "evals": [
+    {
+      "id": "weekly-first-pass-line-chart",
+      "prompt": "Create a report for verified weekly first-pass-rate facts.",
+      "expected_output": "Typed ReportDraft with a line ChartSpec bound to week and first_pass_rate.",
+      "files": []
+    },
+    {
+      "id": "defect-top3-bar-chart",
+      "prompt": "Create a report for verified defect Top3 facts.",
+      "expected_output": "Typed ReportDraft with a bar ChartSpec bound to defect_name and defect_total.",
+      "files": []
+    },
+    {
+      "id": "defect-category-bar-chart",
+      "prompt": "Create a report for verified three-category defect comparison facts.",
+      "expected_output": "Typed ReportDraft with a bar ChartSpec bound to defect_category and defect_total.",
+      "files": []
+    },
+    {
+      "id": "shift-rate-bar-chart",
+      "prompt": "Create a report for verified day/night defect-rate facts.",
+      "expected_output": "Typed ReportDraft with a bar ChartSpec bound to shift_name and defect_rate.",
+      "files": []
+    },
+    {
+      "id": "blocked-source-rate",
+      "prompt": "Create a report for conflicting source-owned overall pass-rate facts.",
+      "expected_output": "The application bypasses the Report Agent and renders a blocked report without an ECharts block.",
+      "files": []
+    }
+  ]
+}

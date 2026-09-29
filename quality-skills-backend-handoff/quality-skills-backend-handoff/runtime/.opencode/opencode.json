@@ -1,0 +1,14 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "skills": {
+    "paths": [
+      ".opencode/skills"
+    ]
+  },
+  "agent": {
+    "quality-python-planner": {
+      "mode": "primary",
+      "description": "Selects a registered quality-analysis recipe and returns a typed AnalysisSpec."
+    }
+  }
+}

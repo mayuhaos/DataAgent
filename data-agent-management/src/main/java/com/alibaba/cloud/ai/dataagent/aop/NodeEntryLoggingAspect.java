@@ -17,10 +17,15 @@ package com.alibaba.cloud.ai.dataagent.aop;
 
 import com.alibaba.cloud.ai.graph.OverAllState;
 import com.alibaba.cloud.ai.dataagent.service.graph.Context.NodeTimingRegistry;
+import com.alibaba.cloud.ai.dataagent.util.NodeTraceLogger;
 import com.alibaba.cloud.ai.dataagent.util.StateUtil;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.aspectj.lang.JoinPoint;
+import org.aspectj.lang.annotation.AfterReturning;
+import org.aspectj.lang.annotation.AfterThrowing;
 import org.aspectj.lang.annotation.Aspect;
 import org.aspectj.lang.annotation.Before;
 import org.aspectj.lang.annotation.Pointcut;
@@ -59,8 +64,40 @@ public class NodeEntryLoggingAspect {
 		if (args != null && args.length > 0 && args[0] instanceof OverAllState state) {
 			String threadId = StateUtil.getStringValue(state, TRACE_THREAD_ID, "");
 			nodeTimingRegistry.recordNodeStart(threadId, className, System.currentTimeMillis());
-			log.debug("State: {}", state);
+			NodeTraceLogger.input(className, state);
 		}
+	}
+
+	@AfterReturning(pointcut = "nodeEntry()", returning = "result")
+	public void logNodeOutput(JoinPoint joinPoint, Object result) {
+		OverAllState state = stateFrom(joinPoint);
+		if (state == null) {
+			return;
+		}
+		NodeTraceLogger.output(joinPoint.getTarget().getClass().getSimpleName(), state, nonStreamingOutput(result));
+	}
+
+	@AfterThrowing(pointcut = "nodeEntry()", throwing = "error")
+	public void logNodeError(JoinPoint joinPoint, Throwable error) {
+		OverAllState state = stateFrom(joinPoint);
+		if (state != null) {
+			NodeTraceLogger.error(joinPoint.getTarget().getClass().getSimpleName(), state, error, "");
+		}
+	}
+
+	private OverAllState stateFrom(JoinPoint joinPoint) {
+		Object[] args = joinPoint.getArgs();
+		return args != null && args.length > 0 && args[0] instanceof OverAllState state ? state : null;
+	}
+
+	private Object nonStreamingOutput(Object result) {
+		if (!(result instanceof Map<?, ?> output)) {
+			return result;
+		}
+		Map<Object, Object> printable = new LinkedHashMap<>();
+		output.forEach((key, value) -> printable.put(key, value instanceof reactor.core.publisher.Flux<?>
+				? "<streaming output; see NODE_OUTPUT_STREAM_COMPLETE>" : value));
+		return printable;
 	}
 
 }

@@ -39,6 +39,7 @@ import reactor.core.publisher.Flux;
 
 import java.util.HashMap;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static com.alibaba.cloud.ai.dataagent.constant.Constant.*;
 import static com.alibaba.cloud.ai.dataagent.util.PlanProcessUtil.getCurrentExecutionStepInstruction;
@@ -109,18 +110,29 @@ public class SqlGenerateNode implements NodeAction {
 		Map<String, Object> result = new HashMap<>(Map.of(SQL_GENERATE_OUTPUT, StateGraph.END, SQL_GENERATE_COUNT,
 				count + 1, SQL_REGENERATE_REASON, SqlRetryDto.empty()));
 
-		// Create display flux for user experience only
-		StringBuilder sqlCollector = new StringBuilder();
+		// SQL generation may contain model reasoning or explanatory prose. Keep the
+		// raw response internal, validate it, and expose only the final read-only SQL.
+		AtomicReference<String> validatedSql = new AtomicReference<>("");
 		Flux<ChatResponse> preFlux = Flux.just(ChatResponseUtil.createResponse(displayMessage),
 				ChatResponseUtil.createPureResponse(TextType.SQL.getStartSign()));
+		Flux<ChatResponse> validatedSqlFlux = sqlFlux.collectList().flatMapMany(chunks -> {
+			String rawSqlResponse = String.join("", chunks);
+			String sql = nl2SqlService.sqlTrim(rawSqlResponse,
+					StateUtil.getStringValue(state, DB_DIALECT_TYPE));
+			if (sql == null) {
+				sql = "";
+			}
+			validatedSql.set(sql);
+			return sql.isBlank() ? Flux.empty() : Flux.just(ChatResponseUtil.createPureResponse(sql));
+		});
 		Flux<ChatResponse> displayFlux = preFlux
-			.concatWith(sqlFlux.doOnNext(sqlCollector::append).map(ChatResponseUtil::createPureResponse))
+			.concatWith(validatedSqlFlux)
 			.concatWith(Flux.just(ChatResponseUtil.createPureResponse(TextType.SQL.getEndSign()),
 					ChatResponseUtil.createResponse("SQL生成完成，准备执行")));
 
 		Flux<GraphResponse<StreamingOutput>> generator = FluxUtil.createStreamingGeneratorWithMessages(this.getClass(),
 				state, v -> {
-					String sql = nl2SqlService.sqlTrim(sqlCollector.toString());
+					String sql = validatedSql.get();
 					result.put(SQL_GENERATE_OUTPUT, sql);
 					return result;
 				}, displayFlux);

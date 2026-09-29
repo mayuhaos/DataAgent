@@ -16,6 +16,8 @@
 package com.alibaba.cloud.ai.dataagent.service.chat;
 
 import com.alibaba.cloud.ai.dataagent.entity.ChatSession;
+import com.alibaba.cloud.ai.dataagent.dto.ModelConfigDTO;
+import com.alibaba.cloud.ai.dataagent.enums.ModelType;
 import com.alibaba.cloud.ai.dataagent.mapper.ChatSessionMapper;
 import com.alibaba.cloud.ai.dataagent.service.aimodelconfig.ModelConfigDataService;
 import org.junit.jupiter.api.BeforeEach;
@@ -99,8 +101,11 @@ class ChatSessionServiceImplTest {
 		Integer agentId = 1;
 		String title = "My Session";
 		Long userId = 100L;
+		ModelConfigDTO defaultModel = new ModelConfigDTO();
+		defaultModel.setId(42);
+		when(modelConfigDataService.getActiveConfigByType(ModelType.CHAT)).thenReturn(defaultModel);
 
-		ChatSession result = service.createSession(agentId, title, userId, null);
+		ChatSession result = service.createSession(agentId, title, userId);
 
 		assertNotNull(result);
 		assertNotNull(result.getId());
@@ -108,15 +113,26 @@ class ChatSessionServiceImplTest {
 		assertEquals(title, result.getTitle());
 		assertEquals("active", result.getStatus());
 		assertEquals(userId, result.getUserId());
+		assertEquals(42, result.getModelConfigId());
 		verify(chatSessionMapper).insert(any(ChatSession.class));
 	}
 
 	@Test
 	void createSession_withNullTitle_usesDefault() {
-		ChatSession result = service.createSession(1, null, 100L, null);
+		ChatSession result = service.createSession(1, null, 100L);
 
 		assertEquals("\u65b0\u4f1a\u8bdd", result.getTitle());
 		verify(chatSessionMapper).insert(any(ChatSession.class));
+	}
+
+	@Test
+	void updateModelConfigId_rejectsEmbeddingModel() {
+		var embeddingModel = new com.alibaba.cloud.ai.dataagent.entity.ModelConfig();
+		embeddingModel.setModelType(ModelType.EMBEDDING);
+		when(modelConfigDataService.findById(7)).thenReturn(embeddingModel);
+
+		assertThrows(IllegalArgumentException.class, () -> service.updateModelConfigId("session-1", 7));
+		verify(chatSessionMapper, never()).updateModelConfigId(anyString(), anyInt(), any());
 	}
 
 	@Test

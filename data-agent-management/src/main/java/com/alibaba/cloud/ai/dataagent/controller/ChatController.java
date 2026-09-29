@@ -62,6 +62,13 @@ public class ChatController {
 	@GetMapping("/agent/{id}/sessions")
 	public ResponseEntity<List<ChatSession>> getAgentSessions(@PathVariable(value = "id") Integer id) {
 		List<ChatSession> sessions = chatSessionService.findByAgentId(id);
+		sessions.stream()
+			.filter(session -> "新会话".equals(session.getTitle()))
+			.forEach(session -> chatMessageService.findBySessionId(session.getId())
+				.stream()
+				.filter(message -> "user".equalsIgnoreCase(message.getRole()))
+				.findFirst()
+				.ifPresent(message -> sessionTitleService.scheduleTitleGeneration(session.getId(), message.getContent())));
 		return ResponseEntity.ok(sessions);
 	}
 
@@ -74,10 +81,9 @@ public class ChatController {
 		String title = request != null ? (String) request.get("title") : null;
 		Long userId = request != null && request.get("userId") instanceof Number user
 				? user.longValue() : null;
-		Integer modelConfigId = request != null && request.get("modelConfigId") instanceof Number model
-				? model.intValue() : null;
-
-		ChatSession session = chatSessionService.createSession(id, title, userId, modelConfigId);
+		// New sessions always snapshot the server-side default CHAT model. Model selection
+		// belongs to an existing session and is changed through the dedicated endpoint.
+		ChatSession session = chatSessionService.createSession(id, title, userId);
 		return ResponseEntity.ok(session);
 	}
 
@@ -135,7 +141,9 @@ public class ChatController {
 			// Update session activity time
 			chatSessionService.updateSessionTime(sessionId);
 
-			if (request.isTitleNeeded()) {
+			// Do not rely solely on the optional frontend flag. Older cached clients may
+			// omit it, while the title service already protects manually named sessions.
+			if ("user".equalsIgnoreCase(message.getRole())) {
 				sessionTitleService.scheduleTitleGeneration(sessionId, message.getContent());
 			}
 

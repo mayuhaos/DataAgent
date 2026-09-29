@@ -1,18 +1,11 @@
-/*
- * Copyright 2026 the original author or authors.
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *      https://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
+/* * Copyright 2026 the original author or authors. * * Licensed under the
+Apache License, Version 2.0 (the "License"); * you may not use this file except
+in compliance with the License. * You may obtain a copy of the License at * *
+https://www.apache.org/licenses/LICENSE-2.0 * * Unless required by applicable
+law or agreed to in writing, software * distributed under the License is
+distributed on an "AS IS" BASIS, * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND,
+either express or implied. * See the License for the specific language governing
+permissions and * limitations under the License. */
 
 <template>
 	<div class="message-list-shell">
@@ -48,12 +41,7 @@
 
 							<!-- ── AI messages ──────────────────────────────────── -->
 							<div v-else class="row ai-row">
-								<v-avatar
-									color="primary"
-									size="34"
-									rounded="lg"
-									class="avatar"
-								>
+								<v-avatar color="primary" size="34" rounded="lg" class="avatar">
 									<v-icon size="18" color="white">mdi-robot</v-icon>
 								</v-avatar>
 
@@ -157,12 +145,7 @@
 						v-if="store.isStreaming && store.nodeBlocks.length > 0"
 						class="row ai-row"
 					>
-						<v-avatar
-							color="primary"
-							size="34"
-							rounded="lg"
-							class="avatar"
-						>
+						<v-avatar color="primary" size="34" rounded="lg" class="avatar">
 							<v-icon size="18" color="white">mdi-robot</v-icon>
 						</v-avatar>
 						<v-card class="ai-card timeline-card" elevation="1">
@@ -192,12 +175,7 @@
 						v-else-if="store.isStreaming && store.nodeBlocks.length === 0"
 						class="row ai-row"
 					>
-						<v-avatar
-							color="primary"
-							size="34"
-							rounded="lg"
-							class="avatar"
-						>
+						<v-avatar color="primary" size="34" rounded="lg" class="avatar">
 							<v-icon size="18" color="white">mdi-robot</v-icon>
 						</v-avatar>
 						<v-card class="ai-card" elevation="1">
@@ -237,10 +215,7 @@ import ChatMarkdownReport from './ChatMarkdownReport.vue';
 import ChatWorkflowTimeline from './ChatWorkflowTimeline.vue';
 import ChatStreamingReport from './ChatStreamingReport.vue';
 
-const TIMELINE_ABSORBED_TYPES = new Set([
-	'result-set',
-	'html',
-]);
+const TIMELINE_ABSORBED_TYPES = new Set(['result-set', 'html']);
 
 const store = useChatStore();
 const listRef = ref<HTMLElement | null>(null);
@@ -310,7 +285,7 @@ function getTimelineExecutionKey(content: string): string | null {
 
 const SANITIZE_OPTIONS = {
 	ADD_TAGS: ['div'],
-	ADD_ATTR: ['style', 'class'],
+	ADD_ATTR: ['style', 'class', 'data-echarts-config'],
 	RETURN_TRUSTED_TYPE: false as const,
 };
 

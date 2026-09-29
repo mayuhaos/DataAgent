@@ -70,6 +70,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -205,6 +206,28 @@ class GraphServiceImplTest {
 		verify(multiTurnContextManager).beginTurn("session-1", "查看刚才统计的明细");
 		assertTrue(graphService.stopStreamProcessing("new-run-thread"));
 		verify(multiTurnContextManager).discardPending("session-1");
+	}
+
+	@Test
+	void graphStreamProcess_rejectsConcurrentNewRequestsForTheSameSession() {
+		GraphRequest firstRequest = GraphRequest.builder().agentId("1").conversationId("session-1")
+			.threadId("first-thread").query("first question").build();
+		GraphRequest secondRequest = GraphRequest.builder().agentId("1").conversationId("session-1")
+			.threadId("second-thread").query("second question").build();
+		Sinks.Many<ServerSentEvent<GraphNodeResponse>> firstSink = Sinks.many().multicast().onBackpressureBuffer();
+		Sinks.Many<ServerSentEvent<GraphNodeResponse>> secondSink = Sinks.many().multicast().onBackpressureBuffer();
+		when(compiledGraph.stream(anyMap(), any(RunnableConfig.class))).thenReturn(Flux.never());
+
+		graphService.graphStreamProcess(firstSink, firstRequest);
+		graphService.graphStreamProcess(secondSink, secondRequest);
+
+		verify(compiledGraph, times(1)).stream(anyMap(), any(RunnableConfig.class));
+		assertTrue(graphService.stopStreamProcessing("first-thread"));
+
+		graphService.graphStreamProcess(secondSink, secondRequest);
+
+		verify(compiledGraph, times(2)).stream(anyMap(), any(RunnableConfig.class));
+		assertTrue(graphService.stopStreamProcessing("second-thread"));
 	}
 
 	@Test

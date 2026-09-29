@@ -81,12 +81,13 @@ public class ModelConfigOpsService {
 			throw new RuntimeException("配置不存在");
 		}
 
-		// 2. 刷新内存模型
+		// 2. Update the persisted default before invalidating the global cache. The
+		// next lazy lookup must observe the newly active configuration.
+		modelConfigDataService.switchActiveStatus(id, entity.getModelType());
+
+		// 3. 刷新内存模型
 		log.info("Activating config ID={}, Type={}...", id, entity.getModelType());
 		refreshMemoryModel(entity.getModelType());
-
-		// 3. 更新数据库状态 (调用数据层)
-		modelConfigDataService.switchActiveStatus(id, entity.getModelType());
 
 		log.info("Config ID={} activated successfully.", id);
 	}

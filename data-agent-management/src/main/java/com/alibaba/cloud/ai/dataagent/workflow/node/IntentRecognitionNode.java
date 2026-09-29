@@ -27,6 +27,7 @@ import com.alibaba.cloud.ai.dataagent.service.llm.LlmService;
 import com.alibaba.cloud.ai.dataagent.util.ChatResponseUtil;
 import com.alibaba.cloud.ai.dataagent.util.FluxUtil;
 import com.alibaba.cloud.ai.dataagent.util.StateUtil;
+import com.alibaba.cloud.ai.dataagent.workflow.IncompleteResultEditDetector;
 import lombok.AllArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.model.ChatResponse;
@@ -55,6 +56,13 @@ public class IntentRecognitionNode implements NodeAction {
 		// 获取用户输入
 		String userInput = StateUtil.getStringValue(state, INPUT_KEY);
 		log.info("User input for intent recognition: {}", userInput);
+		if (IncompleteResultEditDetector.isIncomplete(userInput)) {
+			IntentRecognitionOutputDTO result = new IntentRecognitionOutputDTO();
+			result.setClassification("《需要澄清》");
+			result.setResponse(IncompleteResultEditDetector.clarificationQuestion());
+			log.info("Incomplete chart-edit request detected before intent recognition");
+			return Map.of(INTENT_RECOGNITION_NODE_OUTPUT, result);
+		}
 
 		String multiTurn = StateUtil.getStringValue(state, MULTI_TURN_CONTEXT, "(无)");
 

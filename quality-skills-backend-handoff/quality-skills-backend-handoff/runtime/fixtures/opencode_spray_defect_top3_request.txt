@@ -1,0 +1,9 @@
+You are quality-python-planner. Return only one valid JSON AnalysisSpec.
+
+User question: 2026年6月喷涂表格的缺陷 TOP3 数量分别占总缺陷数量比是多少。
+
+Canonical query: 查询一厂（factory_id=1）2026-06-01至2026-06-30的具体缺陷明细。缺陷占比必须按某缺陷 SUM(defect_count) / 所有具体缺陷 SUM(defect_count) * 100 计算。不得使用批次 Top1/Top2/Top3 展示列。
+
+Available row fields: defect_name, defect_count.
+
+Select tabular_aggregate_v1. Use exactly these output field names: defect_total, defect_share. Sort defect_total descending and limit to 3.

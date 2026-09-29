@@ -19,6 +19,7 @@ import com.alibaba.cloud.ai.dataagent.properties.CodeExecutorProperties;
 import com.alibaba.cloud.ai.dataagent.properties.DataAgentProperties;
 import com.alibaba.cloud.ai.dataagent.properties.FileStorageProperties;
 import com.alibaba.cloud.ai.dataagent.properties.OssStorageProperties;
+import com.alibaba.cloud.ai.dataagent.properties.QualitySkillProperties;
 import com.alibaba.cloud.ai.dataagent.service.code.CodePoolExecutorService;
 import com.alibaba.cloud.ai.dataagent.service.code.CodePoolExecutorServiceFactory;
 import com.alibaba.cloud.ai.dataagent.service.code.docker.DockerExecutorFactory;
@@ -104,7 +105,8 @@ import static com.alibaba.cloud.ai.graph.action.AsyncEdgeAction.edge_async;
 @Slf4j
 @Configuration
 @EnableAsync
-@EnableConfigurationProperties({ CodeExecutorProperties.class, DataAgentProperties.class, FileStorageProperties.class })
+@EnableConfigurationProperties({ CodeExecutorProperties.class, DataAgentProperties.class, FileStorageProperties.class,
+		QualitySkillProperties.class })
 public class DataAgentConfiguration implements DisposableBean {
 
 	/**
@@ -216,6 +218,7 @@ public class DataAgentConfiguration implements DisposableBean {
 			keyStrategyHashMap.put(PYTHON_EXECUTE_NODE_OUTPUT, KeyStrategy.REPLACE);
 			keyStrategyHashMap.put(PYTHON_GENERATE_NODE_OUTPUT, KeyStrategy.REPLACE);
 			keyStrategyHashMap.put(PYTHON_ANALYSIS_NODE_OUTPUT, KeyStrategy.REPLACE);
+			keyStrategyHashMap.put(QUALITY_ANALYSIS_SPEC, KeyStrategy.REPLACE);
 			// NL2SQL相关
 			keyStrategyHashMap.put(IS_ONLY_NL2SQL, KeyStrategy.REPLACE);
 			keyStrategyHashMap.put(THINKING_ENABLED, KeyStrategy.REPLACE);
@@ -225,6 +228,7 @@ public class DataAgentConfiguration implements DisposableBean {
 			keyStrategyHashMap.put(HUMAN_FEEDBACK_DATA, KeyStrategy.REPLACE);
 			// Langfuse 追踪：threadId 透传
 			keyStrategyHashMap.put(TRACE_THREAD_ID, KeyStrategy.REPLACE);
+			keyStrategyHashMap.put(TRACE_CONVERSATION_ID, KeyStrategy.REPLACE);
 			// Final result
 			keyStrategyHashMap.put(RESULT, KeyStrategy.REPLACE);
 			keyStrategyHashMap.put(FINAL_ANSWER, KeyStrategy.REPLACE);
@@ -239,6 +243,7 @@ public class DataAgentConfiguration implements DisposableBean {
 			.addNode(TABLE_RELATION_NODE, nodeBeanUtil.getNodeBeanAsync(TableRelationNode.class))
 			.addNode(FEASIBILITY_ASSESSMENT_NODE, nodeBeanUtil.getNodeBeanAsync(FeasibilityAssessmentNode.class))
 			.addNode(CLARIFICATION_NODE, nodeBeanUtil.getNodeBeanAsync(ClarificationNode.class))
+			.addNode(EARLY_CLARIFICATION_NODE, nodeBeanUtil.getNodeBeanAsync(EarlyClarificationNode.class))
 			.addNode(SQL_GENERATE_NODE, nodeBeanUtil.getNodeBeanAsync(SqlGenerateNode.class))
 			.addNode(PLANNER_NODE, nodeBeanUtil.getNodeBeanAsync(PlannerNode.class))
 			.addNode(PLAN_EXECUTOR_NODE, nodeBeanUtil.getNodeBeanAsync(PlanExecutorNode.class))
@@ -253,10 +258,13 @@ public class DataAgentConfiguration implements DisposableBean {
 
 		stateGraph.addEdge(START, INTENT_RECOGNITION_NODE)
 			.addConditionalEdges(INTENT_RECOGNITION_NODE, edge_async(new IntentRecognitionDispatcher()),
-					Map.of(EVIDENCE_RECALL_NODE, EVIDENCE_RECALL_NODE, END, END))
+					Map.of(EVIDENCE_RECALL_NODE, EVIDENCE_RECALL_NODE, EARLY_CLARIFICATION_NODE,
+							EARLY_CLARIFICATION_NODE, END, END))
+			.addEdge(EARLY_CLARIFICATION_NODE, END)
 			.addEdge(EVIDENCE_RECALL_NODE, QUERY_ENHANCE_NODE)
 			.addConditionalEdges(QUERY_ENHANCE_NODE, edge_async(new QueryEnhanceDispatcher()),
-					Map.of(SCHEMA_RECALL_NODE, SCHEMA_RECALL_NODE, END, END))
+					Map.of(SCHEMA_RECALL_NODE, SCHEMA_RECALL_NODE, EARLY_CLARIFICATION_NODE,
+							EARLY_CLARIFICATION_NODE, END, END))
 			.addConditionalEdges(SCHEMA_RECALL_NODE, edge_async(new SchemaRecallDispatcher()),
 					Map.of(TABLE_RELATION_NODE, TABLE_RELATION_NODE, END, END))
 
@@ -457,6 +465,7 @@ public class DataAgentConfiguration implements DisposableBean {
 	}
 
 	@Bean(name = "dbOperationExecutor")
+	@Primary
 	public ExecutorService dbOperationExecutor() {
 		// 初始化专用线程池，用于数据库操作
 		// 线程数量设置为CPU核心数的2倍，但不少于4个，不超过16个
@@ -483,6 +492,18 @@ public class DataAgentConfiguration implements DisposableBean {
 				new LinkedBlockingQueue<>(500), threadFactory, new ThreadPoolExecutor.CallerRunsPolicy());
 
 		return dbOperationExecutor;
+	}
+
+	@Bean(name = "sessionTitleExecutor", destroyMethod = "shutdown")
+	public ExecutorService sessionTitleExecutor() {
+		AtomicInteger threadNumber = new AtomicInteger(1);
+		ThreadFactory threadFactory = runnable -> {
+			Thread thread = new Thread(runnable, "session-title-" + threadNumber.getAndIncrement());
+			thread.setDaemon(true);
+			return thread;
+		};
+		return new ThreadPoolExecutor(2, 2, 0L, TimeUnit.MILLISECONDS, new LinkedBlockingQueue<>(100), threadFactory,
+				new ThreadPoolExecutor.CallerRunsPolicy());
 	}
 
 	@Override

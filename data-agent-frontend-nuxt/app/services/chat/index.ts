@@ -90,11 +90,10 @@ class ChatService {
    * @param {number} [userId] - 用户 ID
    * @returns {Promise<ChatSession>} 创建成功的会话详情
    */
-  async createSession(agentId: number, title?: string, userId?: number, modelConfigId?: number): Promise<ChatSession> {
+  async createSession(agentId: number, title?: string, userId?: number): Promise<ChatSession> {
     const request = {
       title,
       userId,
-      modelConfigId,
     };
 
     const response = await axios.post<ChatSession>(

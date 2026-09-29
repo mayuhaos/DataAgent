@@ -61,6 +61,9 @@ public class PlanValidator {
 			plan.setExecutionMode(OperationPlan.ExecutionMode.REQUERY);
 			plan.setReason("当前结果缺少可绘制趋势的有序字段或至少两个有效数据点。");
 		}
+		if (hasInvalidAxisRange(plan)) {
+			return clarification("坐标轴下限必须小于上限，请提供有效范围。");
+		}
 		return plan;
 	}
 
@@ -81,7 +84,25 @@ public class PlanValidator {
 
 	private boolean requiresCompleteResult(OperationPlan plan) {
 		return plan.getExecutionMode() == OperationPlan.ExecutionMode.TRANSFORM_LOCAL
-				|| plan.getExecutionMode() == OperationPlan.ExecutionMode.REUSE;
+				|| (plan.getExecutionMode() == OperationPlan.ExecutionMode.REUSE && !hasPresentationChange(plan));
+	}
+
+	private boolean hasPresentationChange(OperationPlan plan) {
+		OperationPlan.PresentationChanges presentation = plan.getChanges().getPresentation();
+		return presentation.getChartType() != null || presentation.getX() != null || presentation.getTitle() != null
+				|| (presentation.getY() != null && !presentation.getY().isEmpty())
+				|| presentation.getXAxisMin() != null || presentation.getXAxisMax() != null
+				|| presentation.getYAxisMin() != null || presentation.getYAxisMax() != null
+				|| presentation.getLegendVisible() != null
+				|| (presentation.getVisibleFields() != null && !presentation.getVisibleFields().isEmpty());
+	}
+
+	private boolean hasInvalidAxisRange(OperationPlan plan) {
+		OperationPlan.PresentationChanges presentation = plan.getChanges().getPresentation();
+		return (presentation.getXAxisMin() != null && presentation.getXAxisMax() != null
+				&& presentation.getXAxisMin() >= presentation.getXAxisMax())
+			|| (presentation.getYAxisMin() != null && presentation.getYAxisMax() != null
+				&& presentation.getYAxisMin() >= presentation.getYAxisMax());
 	}
 
 	private boolean isResultUnavailable(AnalysisArtifact artifact) {

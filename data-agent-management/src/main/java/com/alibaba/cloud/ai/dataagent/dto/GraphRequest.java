@@ -19,6 +19,7 @@ import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
+import java.util.Map;
 
 @Data
 @AllArgsConstructor
@@ -38,6 +39,9 @@ public class GraphRequest {
 	private String threadId;
 
 	private String query;
+
+	/** Server-owned filters supplied by the authenticated integration caller. */
+	private Map<String, String> scopeContext;
 
 	private boolean humanFeedback;
 

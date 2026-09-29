@@ -1,0 +1,9 @@
+You are quality-python-planner. Return only one valid JSON AnalysisSpec.
+
+User question: 基于2026年6月喷涂报表的白夜班缺陷不良率比对。
+
+Canonical query: 查询一厂（factory_id=1）2026-06-01至2026-06-30喷涂批次，按 shift_name 汇总。不良率必须按 SUM(ng_total) / SUM(check_total) * 100 计算，不得平均行级比例。
+
+Available row fields: shift_name, ng_total, check_total.
+
+Select tabular_aggregate_v1. Use exactly these output field names: ng_total, check_total, defect_rate. Sort shift_name ascending.

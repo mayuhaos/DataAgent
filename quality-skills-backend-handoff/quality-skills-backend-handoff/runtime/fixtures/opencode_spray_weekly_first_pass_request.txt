@@ -1,0 +1,9 @@
+You are quality-python-planner. Return only one valid JSON AnalysisSpec.
+
+User question: 2026年6月喷涂报表按周一次合格率趋势。
+
+Canonical query: 查询一厂（factory_id=1）2026-06-01至2026-06-30喷涂批次。周按 ISO 周（周一至周日）分组；一次合格率必须按 SUM(first_pass_count) / SUM(check_total) * 100 计算，不得平均行级比例。
+
+Available row fields: week, check_total, first_pass_count.
+
+Select tabular_aggregate_v1. Use exactly these output field names: check_total, first_pass_count, first_pass_rate. Sort week ascending and add a trend on first_pass_rate.

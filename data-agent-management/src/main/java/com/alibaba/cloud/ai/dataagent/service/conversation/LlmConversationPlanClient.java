@@ -37,11 +37,22 @@ public class LlmConversationPlanClient implements ConversationPlanClient {
 	@Override
 	public OperationPlan plan(String userMessage, String sessionSummary, List<ConversationTopic> topics,
 			List<AnalysisArtifact> artifacts) {
+		return plan(userMessage, sessionSummary, topics, artifacts, Map.of());
+	}
+
+	@Override
+	public OperationPlan plan(String userMessage, String sessionSummary, List<ConversationTopic> topics,
+			List<AnalysisArtifact> artifacts, Map<String, String> scopeContext) {
 		try {
 			String context = JsonUtil.getObjectMapper()
 				.writeValueAsString(Map.of("sessionSummary", truncate(sessionSummary, 4000), "topics", safeTopicCards(topics),
-						"candidateArtifacts", safeArtifactCards(artifacts)));
-			String prompt = "Return only OperationPlan JSON matching the schema. Never return SQL or tool calls.\n"
+						"candidateArtifacts", safeArtifactCards(artifacts), "serverScope", scopeContext));
+			String prompt = "Return only OperationPlan JSON matching the schema. Never return SQL or tool calls. "
+				+ "The serverScope values are mandatory filters and cannot be broadened or removed. "
+				+ "When serverScope contains resolvedArtifactId, use that exact artifact ID. "
+				+ "A request to change an axis, title, legend, colour or chart type is presentation-only: use REUSE and do not set data changes. "
+				+ "A request to filter records, change metrics, dimensions, aggregation, time range or grain requires REQUERY. "
+				+ "yAxisMin/yAxisMax change displayed bounds only; never use them as filters.\n"
 					+ "userMessage=" + userMessage + "\ncontext=" + context;
 			String json = llmService.blockToString(llmService.callUser(prompt, OperationPlan.class));
 			return JsonUtil.getObjectMapper().readValue(json, OperationPlan.class);

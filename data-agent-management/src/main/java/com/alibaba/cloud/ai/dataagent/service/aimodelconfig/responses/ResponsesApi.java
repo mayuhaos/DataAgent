@@ -242,21 +242,25 @@ public class ResponsesApi {
 	 */
 	@JsonInclude(JsonInclude.Include.NON_NULL)
 	public record ResponsesRequest(String model, String instructions, List<InputItem> input, Double temperature,
-			@JsonProperty("max_output_tokens") Integer maxOutputTokens, Thinking thinking,
-			@JsonProperty("reasoning_effort") String reasoningEffort, Boolean stream) {
+			@JsonProperty("max_output_tokens") Integer maxOutputTokens, Thinking thinking, Reasoning reasoning,
+			@JsonProperty("enable_thinking") Boolean enableThinking, Boolean stream) {
 
 		/**
 		 * 返回仅覆盖 stream 标志的副本。 call/stream 入口统一经此方法强制流式开关， 避免在多处手工重建
 		 * record——后续给请求体加字段时只需改这一处，防止字段漏拷
 		 */
 		public ResponsesRequest withStream(boolean stream) {
-			return new ResponsesRequest(model, instructions, input, temperature, maxOutputTokens, thinking,
-					reasoningEffort, stream);
+			return new ResponsesRequest(model, instructions, input, temperature, maxOutputTokens, thinking, reasoning,
+					enableThinking, stream);
 		}
 	}
 
 	@JsonInclude(JsonInclude.Include.NON_NULL)
 	public record Thinking(String type) {
+	}
+
+	@JsonInclude(JsonInclude.Include.NON_NULL)
+	public record Reasoning(String effort) {
 	}
 
 	/**

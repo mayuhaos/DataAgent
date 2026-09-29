@@ -1,0 +1,19 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "model": "dataagent-quality/{env:DATA_AGENT_QUALITY_PROVIDER_MODEL_ID}",
+  "provider": {
+    "dataagent-quality": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "DataAgent Quality Provider",
+      "options": {
+        "baseURL": "{env:DATA_AGENT_QUALITY_PROVIDER_BASE_URL}",
+        "apiKey": "{env:DATA_AGENT_QUALITY_PROVIDER_API_KEY}"
+      },
+      "models": {
+        "{env:DATA_AGENT_QUALITY_PROVIDER_MODEL_ID}": {
+          "name": "DataAgent Quality Model"
+        }
+      }
+    }
+  }
+}

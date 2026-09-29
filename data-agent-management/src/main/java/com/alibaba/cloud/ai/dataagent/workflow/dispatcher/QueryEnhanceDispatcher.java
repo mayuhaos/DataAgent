@@ -19,10 +19,14 @@ import com.alibaba.cloud.ai.dataagent.dto.prompt.QueryEnhanceOutputDTO;
 import com.alibaba.cloud.ai.graph.OverAllState;
 import com.alibaba.cloud.ai.graph.action.EdgeAction;
 import com.alibaba.cloud.ai.dataagent.util.StateUtil;
+import com.alibaba.cloud.ai.dataagent.workflow.IncompleteResultEditDetector;
 import lombok.extern.slf4j.Slf4j;
 
 import static com.alibaba.cloud.ai.dataagent.constant.Constant.QUERY_ENHANCE_NODE_OUTPUT;
+import static com.alibaba.cloud.ai.dataagent.constant.Constant.EARLY_CLARIFICATION_NODE;
 import static com.alibaba.cloud.ai.dataagent.constant.Constant.SCHEMA_RECALL_NODE;
+import static com.alibaba.cloud.ai.dataagent.constant.Constant.ORIGINAL_USER_QUERY;
+import static com.alibaba.cloud.ai.dataagent.constant.Constant.INPUT_KEY;
 import static com.alibaba.cloud.ai.graph.StateGraph.END;
 
 /**
@@ -33,6 +37,13 @@ public class QueryEnhanceDispatcher implements EdgeAction {
 
 	@Override
 	public String apply(OverAllState state) throws Exception {
+		String originalQuery = StateUtil.getStringValue(state, ORIGINAL_USER_QUERY,
+				StateUtil.getStringValue(state, INPUT_KEY, ""));
+		if (IncompleteResultEditDetector.isIncomplete(originalQuery)) {
+			log.warn("Incomplete chart-edit request reached query enhancement; requesting clarification instead");
+			return EARLY_CLARIFICATION_NODE;
+		}
+
 		// 获取查询处理结果
 		QueryEnhanceOutputDTO queryProcessOutput = StateUtil.getObjectValue(state, QUERY_ENHANCE_NODE_OUTPUT,
 				QueryEnhanceOutputDTO.class);

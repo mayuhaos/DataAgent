@@ -42,8 +42,10 @@ public class ConversationService {
 	private final AnalysisArtifactService analysisArtifactService;
 	private final ConversationTopicService conversationTopicService;
 	private final ConversationPlanClient conversationPlanClient;
+	private final ArtifactReferenceResolver artifactReferenceResolver;
 	private final PlanValidator planValidator;
 	private final LocalResultTransformer localResultTransformer;
+	private final PresentationSpecEditor presentationSpecEditor;
 	private final ConversationAuditService conversationAuditService;
 	private final ReportRevisionService reportRevisionService;
 
@@ -55,8 +57,27 @@ public class ConversationService {
 		}
 		List<ConversationTopic> topics = conversationTopicService.findBySessionId(sessionId);
 		List<AnalysisArtifact> artifacts = analysisArtifactService.findBySessionId(sessionId);
-		OperationPlan plan = planValidator.validate(conversationPlanClient.plan(request.getUserMessage(),
-				buildSessionSummary(topics), topics, artifacts), topics, artifacts);
+		java.util.Map<String, String> scopeContext = request.getContext() == null ? java.util.Map.of() : request.getContext();
+		ArtifactReferenceResolver.Resolution reference = artifactReferenceResolver.resolve(request.getUserMessage(), artifacts);
+		if (reference.status() == ArtifactReferenceResolver.Resolution.Status.NOT_FOUND) {
+			return clarification(session, sessionId, request.getUserMessage(), "未找到指定图表。可引用的图表：" + labels(reference.candidates()));
+		}
+		if (reference.status() == ArtifactReferenceResolver.Resolution.Status.AMBIGUOUS) {
+			return clarification(session, sessionId, request.getUserMessage(), "无法确认要修改哪一张图表：" + labels(reference.candidates()));
+		}
+		java.util.Map<String, String> plannerContext = new java.util.LinkedHashMap<>(scopeContext);
+		reference.resolvedArtifact().ifPresent(artifact -> {
+			plannerContext.put("resolvedArtifactId", artifact.getId());
+			plannerContext.put("resolvedArtifactLabel", reference.label());
+			plannerContext.put("referenceResolution", reference.reason());
+		});
+		OperationPlan planned = plannerContext.isEmpty()
+				? conversationPlanClient.plan(request.getUserMessage(), buildSessionSummary(topics), topics, artifacts)
+				: conversationPlanClient.plan(request.getUserMessage(), buildSessionSummary(topics), topics, artifacts, plannerContext);
+		if (reference.status() == ArtifactReferenceResolver.Resolution.Status.RESOLVED) {
+			planned.getTarget().setArtifactIds(java.util.List.of(reference.artifact().getId()));
+		}
+		OperationPlan plan = planValidator.validate(planned, topics, artifacts);
 		String topicId = plan.getTarget().getTopicIds().isEmpty() ? null : plan.getTarget().getTopicIds().get(0);
 		if (topicId == null && (topics.isEmpty() || plan.getOperation() == OperationPlan.Operation.CREATE
 				|| plan.getOperation() == OperationPlan.Operation.SWITCH_TOPIC)) {
@@ -76,7 +97,7 @@ public class ConversationService {
 			derivedArtifact = persistDerivedArtifact(sessionId, plan, artifacts, request.getUserMessage());
 		}
 		String message = plan.getExecutionMode() == OperationPlan.ExecutionMode.ASK_CLARIFICATION
-				? plan.getClarificationQuestion() : plan.getReason();
+				? plan.getClarificationQuestion() : localExecutionMessage(plan, artifacts, derivedArtifact);
 		if (plan.getExecutionMode() == OperationPlan.ExecutionMode.ASK_CLARIFICATION) {
 			chatMessageService.saveMessage(ChatMessage.builder().sessionId(sessionId).role("assistant").content(message)
 					.messageType("clarification").metadata(serialize(plan)).build());
@@ -89,6 +110,44 @@ public class ConversationService {
 				.topicId(topicId)
 				.threadId(threadId).plan(plan).status(status)
 				.message(message).resultArtifactId(derivedArtifact == null ? null : derivedArtifact.getId()).build();
+	}
+
+	private ConversationMessageResponse clarification(ChatSession session, String sessionId, String userMessage, String question) {
+		String threadId = UUID.randomUUID().toString();
+		OperationPlan plan = new OperationPlan();
+		plan.setOperation(OperationPlan.Operation.ASK_CLARIFICATION);
+		plan.setExecutionMode(OperationPlan.ExecutionMode.ASK_CLARIFICATION);
+		plan.setClarificationQuestion(question);
+		plan.setReason(question);
+		chatMessageService.saveMessage(ChatMessage.builder().sessionId(sessionId).role("user")
+			.content(userMessage).messageType("text").build());
+		chatMessageService.saveMessage(ChatMessage.builder().sessionId(sessionId).role("assistant").content(question)
+			.messageType("clarification").metadata(serialize(plan)).build());
+		chatSessionService.updateSessionTime(sessionId);
+		conversationAuditService.save(ConversationAudit.builder().sessionId(sessionId).threadId(threadId)
+			.modelContextHash(conversationAuditService.hash("artifact-reference"))
+			.operationPlan(serialize(plan)).validationResult("CLARIFICATION")
+			.executionMode(plan.getExecutionMode().name()).referencedArtifactIds("[]").build());
+		return ConversationMessageResponse.builder().sessionId(sessionId).agentId(String.valueOf(session.getAgentId()))
+			.threadId(threadId).plan(plan).status("CLARIFICATION").message(question).build();
+	}
+
+	private String labels(List<ArtifactReferenceResolver.Card> candidates) {
+		return candidates.stream().map(ArtifactReferenceResolver.Card::label).collect(java.util.stream.Collectors.joining("；"));
+	}
+
+	private String localExecutionMessage(OperationPlan plan, List<AnalysisArtifact> artifacts, AnalysisArtifact derivedArtifact) {
+		if (plan.getExecutionMode() == OperationPlan.ExecutionMode.REQUERY) {
+			return plan.getReason();
+		}
+		if (plan.getReason() != null && !plan.getReason().isBlank()) {
+			return plan.getReason();
+		}
+		if (derivedArtifact != null && plan.getTarget().getArtifactIds().size() == 1) {
+			String sourceId = plan.getTarget().getArtifactIds().get(0);
+			return "已更新图表 " + sourceId + "，并创建新版本 " + derivedArtifact.getId() + "。";
+		}
+		return "已处理该结果修改。";
 	}
 
 	private AnalysisArtifact persistDerivedArtifact(String sessionId, OperationPlan plan, List<AnalysisArtifact> artifacts,
@@ -116,7 +175,7 @@ public class ConversationService {
 			.resultSchema(source.getResultSchema())
 			.resultSample(source.getResultSample())
 			.resultSummary(source.getResultSummary())
-			.presentationSpec(serialize(plan.getChanges().getPresentation()))
+			.presentationSpec(presentationSpecEditor.apply(source.getPresentationSpec(), plan.getChanges().getPresentation()))
 			.provenance(source.getProvenance())
 			.expireTime(source.getExpireTime())
 			.status("SUCCESS")

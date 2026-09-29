@@ -124,7 +124,7 @@ class SqlExecuteNodeTest {
 	private void setupBasicMocks() {
 		DbConfigBO dbConfig = new DbConfigBO();
 		dbConfig.setSchema("test_schema");
-		when(nl2SqlService.sqlTrim(any())).thenAnswer(inv -> inv.getArgument(0));
+		when(nl2SqlService.sqlTrim(any(), any())).thenAnswer(inv -> inv.getArgument(0));
 		when(databaseUtil.getAgentDbConfig(1L)).thenReturn(dbConfig);
 		when(databaseUtil.getAgentAccessor(1L)).thenReturn(accessor);
 	}
@@ -140,7 +140,7 @@ class SqlExecuteNodeTest {
 		ResultSetBO resultSetBO = new ResultSetBO();
 		resultSetBO.setData(new ArrayList<>());
 
-		when(nl2SqlService.sqlTrim(any())).thenReturn("SELECT * FROM users");
+		when(nl2SqlService.sqlTrim(any(), any())).thenReturn("SELECT * FROM users");
 		when(databaseUtil.getAgentDbConfig(1L)).thenReturn(dbConfig);
 		when(databaseUtil.getAgentAccessor(1L)).thenReturn(accessor);
 		when(accessor.executeSqlAndReturnObject(any(), any())).thenReturn(resultSetBO);
@@ -163,7 +163,7 @@ class SqlExecuteNodeTest {
 		ResultSetBO resultSetBO = new ResultSetBO();
 		resultSetBO.setData(new ArrayList<>());
 
-		when(nl2SqlService.sqlTrim(any())).thenReturn("SELECT id, name, age FROM users");
+		when(nl2SqlService.sqlTrim(any(), any())).thenReturn("SELECT id, name, age FROM users");
 		when(databaseUtil.getAgentDbConfig(1L)).thenReturn(dbConfig);
 		when(databaseUtil.getAgentAccessor(1L)).thenReturn(accessor);
 		when(accessor.executeSqlAndReturnObject(any(), any())).thenReturn(resultSetBO);
@@ -193,7 +193,7 @@ class SqlExecuteNodeTest {
 		OverAllState state = createTestState();
 		setupBasicState(state);
 
-		when(nl2SqlService.sqlTrim(any())).thenAnswer(inv -> inv.getArgument(0));
+		when(nl2SqlService.sqlTrim(any(), any())).thenAnswer(inv -> inv.getArgument(0));
 		when(databaseUtil.getAgentDbConfig(1L)).thenThrow(new RuntimeException("Connection refused"));
 
 		assertThrows(RuntimeException.class, () -> sqlExecuteNode.apply(state));
@@ -205,7 +205,7 @@ class SqlExecuteNodeTest {
 		state.updateState(Map.of(SQL_GENERATE_OUTPUT, "SELECT * FROM users", PLANNER_NODE_OUTPUT, TEST_PLAN_JSON,
 				PLAN_CURRENT_STEP, 1));
 
-		when(nl2SqlService.sqlTrim(any())).thenAnswer(inv -> inv.getArgument(0));
+		when(nl2SqlService.sqlTrim(any(), any())).thenAnswer(inv -> inv.getArgument(0));
 
 		assertThrows(Exception.class, () -> sqlExecuteNode.apply(state));
 	}

@@ -16,6 +16,7 @@
 package com.alibaba.cloud.ai.dataagent.service.llm.impls;
 
 import com.alibaba.cloud.ai.dataagent.service.aimodelconfig.AiModelRegistry;
+import com.alibaba.cloud.ai.dataagent.service.aimodelconfig.ThinkingModeOptions;
 import com.alibaba.cloud.ai.dataagent.service.llm.LlmService;
 import com.alibaba.cloud.ai.dataagent.enums.ReasoningEffort;
 import com.alibaba.cloud.ai.dataagent.util.StateUtil;
@@ -30,7 +31,6 @@ import reactor.core.scheduler.Schedulers;
 import reactor.util.retry.Retry;
 
 import java.time.Duration;
-import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
@@ -199,14 +199,15 @@ public class StreamLlmService implements LlmService {
 			return spec;
 		}
 
-		String type = Boolean.TRUE.equals(enabled) ? "enabled" : "disabled";
+		Integer modelConfigId = StateUtil.getObjectValue(state, CHAT_MODEL_CONFIG_ID, Integer.class, (Integer) null);
+		var modelConfig = registry.getChatModelConfig(modelConfigId);
 		OpenAiChatOptions.Builder options = OpenAiChatOptions.builder()
-			.extraBody(Map.of("thinking", Map.of("type", type)));
+			.extraBody(ThinkingModeOptions.extraBody(modelConfig, Boolean.TRUE.equals(enabled)));
 		if (Boolean.TRUE.equals(enabled)) {
-			String effort = ReasoningEffort
-				.fromCode(StateUtil.getStringValue(state, REASONING_EFFORT, ReasoningEffort.HIGH.getCode()))
-				.getCode();
-			options.reasoningEffort(effort);
+			String requestedEffort = StateUtil.getStringValue(state, REASONING_EFFORT, ReasoningEffort.HIGH.getCode());
+			if (!ThinkingModeOptions.isQwen(modelConfig)) {
+				options.reasoningEffort(ReasoningEffort.fromCode(requestedEffort).getCode());
+			}
 		}
 		return spec.options(options.build());
 	}

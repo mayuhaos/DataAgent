@@ -40,7 +40,7 @@ public class SqlGenerateDispatcher implements EdgeAction {
 	@Override
 	public String apply(OverAllState state) {
 		Optional<Object> optional = state.value(SQL_GENERATE_OUTPUT);
-		if (optional.isEmpty()) {
+		if (optional.isEmpty() || !(optional.get() instanceof String sql) || sql.isBlank()) {
 			int currentCount = state.value(SQL_GENERATE_COUNT, properties.getMaxSqlRetryCount());
 			// 生成失败，重新生成
 			if (currentCount < properties.getMaxSqlRetryCount()) {

@@ -35,7 +35,10 @@ public interface AnalysisArtifactMapper {
 	int insert(AnalysisArtifact artifact);
 
 	@Select("""
-			SELECT * FROM analysis_artifact
+			SELECT id, session_id, topic_id, parent_artifact_id, type, input_spec, result_ref, content_ref, provenance,
+			       expire_time, user_question, sql_query, result_schema, result_sample, result_summary, presentation_spec,
+			       status, create_time
+			FROM analysis_artifact
 			WHERE session_id = #{sessionId} AND status = 'SUCCESS'
 			ORDER BY create_time DESC, id DESC
 			LIMIT 1
@@ -43,7 +46,10 @@ public interface AnalysisArtifactMapper {
 	AnalysisArtifact selectLatestSuccessfulBySessionId(@Param("sessionId") String sessionId);
 
 	@Select("""
-			SELECT * FROM analysis_artifact
+			SELECT id, session_id, topic_id, parent_artifact_id, type, input_spec, result_ref, content_ref, provenance,
+			       expire_time, user_question, sql_query, result_schema, result_sample, result_summary, presentation_spec,
+			       status, create_time
+			FROM analysis_artifact
 			WHERE session_id = #{sessionId} AND topic_id = #{topicId} AND status = 'SUCCESS'
 			ORDER BY create_time DESC, id DESC LIMIT 1
 			""")
@@ -51,12 +57,20 @@ public interface AnalysisArtifactMapper {
 			@Param("topicId") String topicId);
 
 	@Select("""
-			SELECT * FROM analysis_artifact WHERE session_id = #{sessionId}
+			SELECT id, session_id, topic_id, parent_artifact_id, type, input_spec, result_ref, content_ref, provenance,
+			       expire_time, user_question, sql_query, result_schema, result_sample, result_summary, presentation_spec,
+			       status, create_time
+			FROM analysis_artifact WHERE session_id = #{sessionId}
 			ORDER BY create_time DESC, id DESC
 			""")
 	List<AnalysisArtifact> selectBySessionId(@Param("sessionId") String sessionId);
 
-	@Select("SELECT * FROM analysis_artifact WHERE id = #{id}")
+	@Select("""
+			SELECT id, session_id, topic_id, parent_artifact_id, type, input_spec, result_ref, content_ref, provenance,
+			       expire_time, user_question, sql_query, result_schema, result_sample, result_summary, presentation_spec,
+			       status, create_time
+			FROM analysis_artifact WHERE id = #{id}
+			""")
 	AnalysisArtifact selectById(@Param("id") String id);
 
 }

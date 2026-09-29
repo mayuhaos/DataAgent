@@ -48,7 +48,9 @@ class ConversationServiceTest {
 	@Mock private AnalysisArtifactService analysisArtifactService;
 	@Mock private ConversationTopicService conversationTopicService;
 	@Mock private ConversationPlanClient conversationPlanClient;
+	@Mock private ArtifactReferenceResolver artifactReferenceResolver;
 	@Mock private LocalResultTransformer localResultTransformer;
+	@Mock private PresentationSpecEditor presentationSpecEditor;
 	@Mock private ConversationAuditService conversationAuditService;
 	@Mock private ReportRevisionService reportRevisionService;
 	private ConversationService service;
@@ -56,8 +58,8 @@ class ConversationServiceTest {
 	@BeforeEach
 	void setUp() {
 		service = new ConversationService(chatSessionService, chatMessageService, analysisArtifactService,
-				conversationTopicService, conversationPlanClient, new PlanValidator(), localResultTransformer,
-				conversationAuditService, reportRevisionService);
+				conversationTopicService, conversationPlanClient, artifactReferenceResolver, new PlanValidator(), localResultTransformer,
+				presentationSpecEditor, conversationAuditService, reportRevisionService);
 		when(conversationAuditService.hash(any())).thenReturn("context-hash");
 		when(chatSessionService.findBySessionId("session-1"))
 				.thenReturn(ChatSession.builder().id("session-1").agentId(42).build());
@@ -68,6 +70,8 @@ class ConversationServiceTest {
 			return topic;
 		});
 		when(analysisArtifactService.findBySessionId("session-1")).thenReturn(List.of());
+		when(artifactReferenceResolver.resolve(org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.anyList()))
+				.thenReturn(ArtifactReferenceResolver.Resolution.none());
 	}
 
 	@Test
@@ -130,6 +134,8 @@ class ConversationServiceTest {
 			.builder().id("report-1").sessionId("session-1").type("REPORT").userQuestion("old").status("SUCCESS")
 			.build();
 		when(analysisArtifactService.findBySessionId("session-1")).thenReturn(List.of(source));
+		when(presentationSpecEditor.apply(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any()))
+				.thenReturn("{}");
 		when(conversationPlanClient.plan(eq("精简报告"), any(), any(), any())).thenReturn(plan);
 		ConversationMessageRequest request = new ConversationMessageRequest();
 		request.setUserMessage("精简报告");

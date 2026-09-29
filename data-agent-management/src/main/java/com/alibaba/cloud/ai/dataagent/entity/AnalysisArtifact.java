@@ -16,12 +16,16 @@
 package com.alibaba.cloud.ai.dataagent.entity;
 
 import java.time.LocalDateTime;
+import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
+import lombok.NoArgsConstructor;
 
 /** Compact, reusable data-analysis result for one completed chat turn. */
 @Data
 @Builder
+@AllArgsConstructor
+@NoArgsConstructor
 public class AnalysisArtifact {
 
 	private String id;

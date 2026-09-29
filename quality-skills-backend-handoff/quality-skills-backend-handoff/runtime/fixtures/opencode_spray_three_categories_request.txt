@@ -1,0 +1,9 @@
+You are quality-python-planner. Return only one valid JSON AnalysisSpec.
+
+User question: 对比2026年6月喷涂表格的塑件缺陷、喷房缺陷和设备环境三类不良数。
+
+Canonical query: 查询一厂（factory_id=1）2026-06-01至2026-06-30喷涂批次。输入已将三个源字段标准化为三种 defect_category：塑件缺陷、喷房缺陷、设备环境。按类别汇总 defect_count；不要计算占比。
+
+Available row fields: defect_category, defect_count.
+
+Select tabular_aggregate_v1. Use exactly this output field name: defect_total. Sort defect_total descending.

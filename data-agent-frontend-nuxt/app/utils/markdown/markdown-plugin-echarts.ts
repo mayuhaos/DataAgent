@@ -20,8 +20,11 @@ const echartsPlugin = (md: MarkdownIt) => {
 	const originalFence = md.renderer.rules.fence!.bind(md.renderer.rules);
 	md.renderer.rules.fence = (tokens, idx, options, env, slf) => {
 		const token = tokens[idx]!;
-		if (token.info.trim() === 'echarts') {
-			const code = token.content.trim();
+		const info = token.info.trim();
+		const languageMatch = info.match(/^(echarts?)(.*)$/i);
+		const language = languageMatch?.[1]?.toLowerCase() ?? '';
+		if (language === 'echarts' || language === 'echart') {
+			const code = `${languageMatch?.[2]?.trim() ?? ''}${token.content}`.trim();
 			const braceOpen = code.match(/\{/g)?.length ?? 0;
 			const braceClose = code.match(/\}/g)?.length ?? 0;
 			const hasValidContent =

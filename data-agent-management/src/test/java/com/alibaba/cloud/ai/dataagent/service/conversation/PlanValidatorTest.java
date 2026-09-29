@@ -88,4 +88,30 @@ class PlanValidatorTest {
 		assertEquals(OperationPlan.ExecutionMode.REQUERY, result.getExecutionMode());
 	}
 
+	@Test
+	void keepsDisplayOnlyAxisEditLocalWhenTheStoredResultExpired() {
+		OperationPlan plan = new OperationPlan();
+		plan.setExecutionMode(OperationPlan.ExecutionMode.REUSE);
+		plan.getTarget().setArtifactIds(List.of("artifact-1"));
+		plan.getChanges().getPresentation().setYAxisMax(150D);
+		AnalysisArtifact artifact = AnalysisArtifact.builder().id("artifact-1")
+				.expireTime(LocalDateTime.now().minusMinutes(1)).build();
+
+		OperationPlan result = validator.validate(plan, List.of(), List.of(artifact));
+
+		assertEquals(OperationPlan.ExecutionMode.REUSE, result.getExecutionMode());
+	}
+
+	@Test
+	void rejectsAnInvalidDisplayRange() {
+		OperationPlan plan = new OperationPlan();
+		plan.setExecutionMode(OperationPlan.ExecutionMode.REUSE);
+		plan.getChanges().getPresentation().setYAxisMin(150D);
+		plan.getChanges().getPresentation().setYAxisMax(120D);
+
+		OperationPlan result = validator.validate(plan, List.of(), List.of());
+
+		assertEquals(OperationPlan.ExecutionMode.ASK_CLARIFICATION, result.getExecutionMode());
+	}
+
 }

@@ -117,6 +117,8 @@ public final class Constant {
 
 	public static final String CLARIFICATION_NODE = "CLARIFICATION_NODE";
 
+	public static final String EARLY_CLARIFICATION_NODE = "EARLY_CLARIFICATION_NODE";
+
 	public static final String REPORT_GENERATOR_NODE = "REPORT_GENERATOR_NODE";
 
 	public static final String SCHEMA_RECALL_NODE = "SCHEMA_RECALL_NODE";
@@ -157,6 +159,9 @@ public final class Constant {
 
 	public static final String PYTHON_ANALYSIS_NODE_OUTPUT = "PYTHON_ANALYSIS_NODE_OUTPUT";
 
+	/** Validated remote quality recipe selection, retained for shadow-mode evaluation. */
+	public static final String QUALITY_ANALYSIS_SPEC = "QUALITY_ANALYSIS_SPEC";
+
 	// nl2sql接口预留相关
 	public static final String IS_ONLY_NL2SQL = "IS_ONLY_NL2SQL";
 
@@ -189,5 +194,8 @@ public final class Constant {
 
 	// Langfuse 追踪：threadId 透传到 graph state，用于 token 累计
 	public static final String TRACE_THREAD_ID = "TRACE_THREAD_ID";
+
+	// 节点审计日志：稳定会话 ID 透传到 graph state，便于按对话检索所有节点输入输出
+	public static final String TRACE_CONVERSATION_ID = "TRACE_CONVERSATION_ID";
 
 }

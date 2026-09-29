@@ -320,6 +320,8 @@ class PromptHelperTest {
 		String result = PromptHelper.buildReportGeneratorPromptWithOptimization("requirements", "steps", "summary",
 				null);
 		assertNotNull(result);
+		assertTrue(result.contains("全小写的 `echarts`"));
+		assertTrue(result.contains("代码块内嵌套或重复开启代码围栏"));
 	}
 
 	@Test

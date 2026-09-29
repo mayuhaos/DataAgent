@@ -116,6 +116,18 @@ public class AiModelRegistry {
 		return ChatClient.builder(modelFactory.createChatModel(ModelConfigConverter.toDTO(config))).build();
 	}
 
+	/** Returns the configuration that controls provider-specific request options. */
+	public ModelConfigDTO getChatModelConfig(Integer modelConfigId) {
+		if (modelConfigId == null) {
+			return modelConfigDataService.getActiveConfigByType(ModelType.CHAT);
+		}
+		var config = modelConfigDataService.findById(modelConfigId);
+		if (config == null || config.getModelType() != ModelType.CHAT) {
+			throw new IllegalArgumentException("No CHAT model configuration found for id: " + modelConfigId);
+		}
+		return ModelConfigConverter.toDTO(config);
+	}
+
 	// =========================================================
 	// 2. 获取 EmbeddingModel (懒加载 + Dummy 兜底)
 	// =========================================================

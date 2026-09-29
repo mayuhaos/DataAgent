@@ -98,7 +98,7 @@ public final class FluxUtil {
 				wrapperFlux = wrapperFlux.concatWith(Flux.just(ChatResponseUtil.createResponse(completionMessage)));
 			}
 			return toStreamingResponseFlux(nodeName, state, wrapperFlux,
-					() -> resultMapper.apply(collectedResult.toString()));
+					() -> resultMapper.apply(collectedResult.toString()), collectedResult::toString);
 		});
 	}
 
@@ -127,12 +127,12 @@ public final class FluxUtil {
 			Flux<ChatResponse> collectedSource = sourceFlux
 				.doOnNext(response -> collectedResult.append(ChatResponseUtil.getText(response)));
 			return toStreamingResponseFlux(nodeName, state, Flux.concat(preFlux, collectedSource, sufFlux),
-					() -> sourceMapper.apply(collectedResult.toString()));
+					() -> sourceMapper.apply(collectedResult.toString()), collectedResult::toString);
 		});
 	}
 
 	private static Flux<GraphResponse<StreamingOutput>> toStreamingResponseFlux(String nodeName, OverAllState state,
-			Flux<ChatResponse> sourceFlux, Supplier<Map<String, Object>> resultSupplier) {
+			Flux<ChatResponse> sourceFlux, Supplier<Map<String, Object>> resultSupplier, Supplier<String> outputSupplier) {
 		Object threadId = state.value(TRACE_THREAD_ID).orElse(null);
 
 		Flux<GraphResponse<StreamingOutput>> streamingFlux = sourceFlux
@@ -142,7 +142,13 @@ public final class FluxUtil {
 			.map(response -> GraphResponse.of(new StreamingOutput<>(response.getResult().getOutput(), response,
 					nodeName, "", state, OutputType.from(true, nodeName))));
 
-		return streamingFlux.concatWith(Mono.fromSupplier(() -> GraphResponse.done(resultSupplier.get())))
+		return streamingFlux.concatWith(Mono.fromSupplier(() -> {
+			Map<String, Object> result = resultSupplier.get();
+			NodeTraceLogger.streamOutput(nodeName, state, outputSupplier.get());
+			return GraphResponse.done(result);
+		}))
+			.doOnError(error -> NodeTraceLogger.error(nodeName, state, error, outputSupplier.get()))
+			.doOnCancel(() -> NodeTraceLogger.cancelled(nodeName, state, outputSupplier.get()))
 			.onErrorResume(error -> Flux.just(GraphResponse.error(error)));
 	}
 

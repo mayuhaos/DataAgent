@@ -35,6 +35,7 @@ import com.alibaba.cloud.ai.dataagent.util.SchemaSampleMasker;
 import com.alibaba.cloud.ai.dataagent.vo.GraphNodeResponse;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.alibaba.cloud.ai.dataagent.workflow.node.ClarificationNode;
+import com.alibaba.cloud.ai.dataagent.workflow.node.EarlyClarificationNode;
 import com.alibaba.cloud.ai.dataagent.workflow.node.PlannerNode;
 import com.alibaba.cloud.ai.dataagent.workflow.node.ReportGeneratorNode;
 import com.alibaba.cloud.ai.graph.CompileConfig;
@@ -62,6 +63,8 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 import java.time.Duration;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
@@ -88,6 +91,7 @@ import static com.alibaba.cloud.ai.dataagent.constant.Constant.SQL_GENERATE_OUTP
 import static com.alibaba.cloud.ai.dataagent.constant.Constant.STREAM_EVENT_COMPLETE;
 import static com.alibaba.cloud.ai.dataagent.constant.Constant.STREAM_EVENT_ERROR;
 import static com.alibaba.cloud.ai.dataagent.constant.Constant.TRACE_THREAD_ID;
+import static com.alibaba.cloud.ai.dataagent.constant.Constant.TRACE_CONVERSATION_ID;
 import static com.alibaba.cloud.ai.dataagent.constant.Constant.THINKING_ENABLED;
 
 @Slf4j
@@ -96,6 +100,9 @@ public class GraphServiceImpl implements GraphService {
 
 	private static final String RESUME_MODE_CLARIFICATION = "clarification";
 
+	private static final Pattern ECHARTS_BLOCK = Pattern
+		.compile("```echarts?\\s*\\R(\\{.*?})\\s*\\R```", Pattern.CASE_INSENSITIVE | Pattern.DOTALL);
+
 	private static final long RECONNECT_GRACE_PERIOD_SECONDS = 45;
 
 	private final CompiledGraph compiledGraph;
@@ -103,6 +110,9 @@ public class GraphServiceImpl implements GraphService {
 	private final ExecutorService executor;
 
 	private final ConcurrentHashMap<String, StreamContext> streamContextMap = new ConcurrentHashMap<>();
+
+	/** One new graph execution may run for a chat session at a time. */
+	private final ConcurrentHashMap<String, String> activeConversationThreads = new ConcurrentHashMap<>();
 
 	private final ScheduledExecutorService reconnectScheduler = Executors.newSingleThreadScheduledExecutor();
 
@@ -164,6 +174,13 @@ public class GraphServiceImpl implements GraphService {
 			attachReconnectSink(existingContext, sink, graphRequest);
 			return;
 		}
+		boolean isContinuation = StringUtils.hasText(graphRequest.getHumanFeedbackContent())
+				|| (RESUME_MODE_CLARIFICATION.equalsIgnoreCase(graphRequest.getResumeMode())
+						&& StringUtils.hasText(graphRequest.getClarificationAnswer()));
+		if (!isContinuation && !acquireConversationExecution(graphRequest.getConversationId(), threadId)) {
+			emitConcurrentExecutionFailure(sink, graphRequest);
+			return;
+		}
 
 		StreamContext context = streamContextMap.computeIfAbsent(threadId, k -> new StreamContext());
 		context.attachSink(sink);
@@ -174,19 +191,52 @@ public class GraphServiceImpl implements GraphService {
 		context.setMultiTurnContextId(getMultiTurnContextId(graphRequest));
 		context.setUserQuestion(graphRequest.getQuery());
 
-		if (StringUtils.hasText(graphRequest.getHumanFeedbackContent())) {
-			handleHumanFeedback(graphRequest);
-			return;
-		}
+		try {
+			if (StringUtils.hasText(graphRequest.getHumanFeedbackContent())) {
+				handleHumanFeedback(graphRequest);
+				return;
+			}
 
-		if (RESUME_MODE_CLARIFICATION.equalsIgnoreCase(graphRequest.getResumeMode())
-				&& StringUtils.hasText(graphRequest.getClarificationAnswer())) {
-			handleClarificationResume(graphRequest);
-			return;
-		}
+			if (RESUME_MODE_CLARIFICATION.equalsIgnoreCase(graphRequest.getResumeMode())
+					&& StringUtils.hasText(graphRequest.getClarificationAnswer())) {
+				handleClarificationResume(graphRequest);
+				return;
+			}
 
-		clarificationContextManager.clear(threadId);
-		handleNewProcess(graphRequest);
+			clarificationContextManager.clear(threadId);
+			handleNewProcess(graphRequest);
+		}
+		catch (RuntimeException ex) {
+			streamContextMap.remove(threadId, context);
+			releaseConversationExecution(context);
+			context.cleanup();
+			throw ex;
+		}
+	}
+
+	private boolean acquireConversationExecution(String conversationId, String threadId) {
+		return !StringUtils.hasText(conversationId)
+				|| activeConversationThreads.putIfAbsent(conversationId, threadId) == null;
+	}
+
+	private void releaseConversationExecution(StreamContext context) {
+		if (context != null) {
+			releaseConversationExecution(context.getConversationId(), context.getThreadId());
+		}
+	}
+
+	private void releaseConversationExecution(String conversationId, String threadId) {
+		if (StringUtils.hasText(conversationId) && StringUtils.hasText(threadId)) {
+			activeConversationThreads.remove(conversationId, threadId);
+		}
+	}
+
+	private void emitConcurrentExecutionFailure(Sinks.Many<ServerSentEvent<GraphNodeResponse>> sink,
+			GraphRequest graphRequest) {
+		GraphNodeResponse response = GraphNodeResponse.error(graphRequest.getAgentId(), graphRequest.getThreadId(),
+				"当前会话已有任务正在执行，请等待完成后再提问。");
+		sink.tryEmitNext(ServerSentEvent.<GraphNodeResponse>builder(response).event(STREAM_EVENT_ERROR).build());
+		sink.tryEmitComplete();
 	}
 
 	@Override
@@ -220,6 +270,7 @@ public class GraphServiceImpl implements GraphService {
 			return false;
 		}
 		multiTurnContextManager.discardPending(getMultiTurnContextId(context));
+		releaseConversationExecution(context);
 		nodeTimingRegistry.clear(threadId);
 		if (context.getSpan() != null && context.getSpan().isRecording()) {
 			langfuseReporter.endSpanSuccess(context.getSpan(), threadId, context.getCollectedOutput());
@@ -334,17 +385,17 @@ public class GraphServiceImpl implements GraphService {
 		multiTurnContextManager.beginTurn(multiTurnContextId, inputQuery);
 		Integer modelConfigId = chatSessionService.resolveModelConfigId(graphRequest.getConversationId());
 		Flux<NodeOutput> nodeOutputFlux = compiledGraph.stream(
-				buildInitialState(agentId, threadId, inputQuery, originalUserQuery, multiTurnContext, nl2sqlOnly,
+				buildInitialState(agentId, threadId, inputQuery, originalUserQuery, multiTurnContext, graphRequest.getScopeContext(), nl2sqlOnly,
 						humanReviewEnabled, clarificationCount, clarificationAnswer, graphRequest.getThinkingEnabled(),
-						graphRequest.getReasoningEffort(), modelConfigId),
+						graphRequest.getReasoningEffort(), modelConfigId, graphRequest.getConversationId()),
 				RunnableConfig.builder().threadId(threadId).build());
 		subscribeToFlux(context, nodeOutputFlux, graphRequest, agentId, threadId);
 	}
 
 	private Map<String, Object> buildInitialState(String agentId, String threadId, String inputQuery,
-			String originalUserQuery, String multiTurnContext, boolean nl2sqlOnly, boolean humanReviewEnabled,
+			String originalUserQuery, String multiTurnContext, Map<String, String> scopeContext, boolean nl2sqlOnly, boolean humanReviewEnabled,
 			int clarificationCount, String clarificationAnswer, Boolean thinkingEnabled, String reasoningEffort,
-			Integer modelConfigId) {
+			Integer modelConfigId, String conversationId) {
 		Map<String, Object> state = new HashMap<>();
 		state.put(IS_ONLY_NL2SQL, nl2sqlOnly);
 		if (thinkingEnabled != null) {
@@ -357,8 +408,13 @@ public class GraphServiceImpl implements GraphService {
 			state.put(CHAT_MODEL_CONFIG_ID, modelConfigId);
 		}
 		state.put(HUMAN_REVIEW_ENABLED, humanReviewEnabled);
-		state.put(MULTI_TURN_CONTEXT, multiTurnContext);
+		String scopedContext = multiTurnContext;
+		if (scopeContext != null && !scopeContext.isEmpty()) {
+			scopedContext += "\n服务端强制数据范围（不可扩大或删除）：" + scopeContext;
+		}
+		state.put(MULTI_TURN_CONTEXT, scopedContext);
 		state.put(TRACE_THREAD_ID, threadId);
+		state.put(TRACE_CONVERSATION_ID, conversationId);
 		state.put(ORIGINAL_USER_QUERY, StringUtils.hasText(originalUserQuery) ? originalUserQuery : inputQuery);
 		state.put(REFINED_USER_QUERY, inputQuery);
 		state.put(CLARIFICATION_COUNT, clarificationCount);
@@ -547,6 +603,7 @@ public class GraphServiceImpl implements GraphService {
 				: (StringUtils.hasText(error.getMessage()) ? error.getMessage() : "模型调用失败");
 		StreamContext context = streamContextMap.remove(threadId);
 		if (context != null && !context.isCleaned()) {
+			releaseConversationExecution(context);
 			long now = System.currentTimeMillis();
 			emitFinalNodeTiming(context, agentId, threadId, now);
 			persistStreamFailure(context, errorMessage);
@@ -707,6 +764,7 @@ public class GraphServiceImpl implements GraphService {
 				.status("SUCCESS")
 				.build();
 			analysisArtifactService.save(artifact);
+			persistReportCharts(artifact, report.toString(), expireTime);
 			if (!report.isEmpty()) {
 				AnalysisArtifact reportArtifact = AnalysisArtifact.builder().sessionId(sessionId).topicId(context.getTopicId())
 						.parentArtifactId(artifact.getId()).type("REPORT").inputSpec(artifact.getInputSpec())
@@ -719,6 +777,25 @@ public class GraphServiceImpl implements GraphService {
 		}
 		catch (Exception ex) {
 			log.warn("Failed to persist analysis artifact for session {}", sessionId, ex);
+		}
+	}
+
+	private void persistReportCharts(AnalysisArtifact source, String report, java.time.LocalDateTime expireTime) {
+		Matcher matcher = ECHARTS_BLOCK.matcher(report);
+		while (matcher.find()) {
+			String presentationSpec = matcher.group(1).trim();
+			try {
+				JsonUtil.getObjectMapper().readTree(presentationSpec);
+			}
+			catch (Exception ignored) {
+				continue;
+			}
+			analysisArtifactService.save(AnalysisArtifact.builder().sessionId(source.getSessionId()).topicId(source.getTopicId())
+					.parentArtifactId(source.getId()).type("CHART").inputSpec(source.getInputSpec())
+					.userQuestion(source.getUserQuestion()).sqlQuery(source.getSqlQuery()).resultRef(source.getResultRef())
+					.resultSchema(source.getResultSchema()).resultSample(source.getResultSample())
+					.resultSummary(source.getResultSummary()).presentationSpec(presentationSpec).provenance(source.getProvenance())
+					.expireTime(expireTime).status("SUCCESS").build());
 		}
 	}
 
@@ -747,6 +824,7 @@ public class GraphServiceImpl implements GraphService {
 
 		context = streamContextMap.remove(threadId);
 			if (context != null && !context.isCleaned()) {
+				releaseConversationExecution(context);
 				long now = System.currentTimeMillis();
 				emitFinalNodeTiming(context, agentId, threadId, now);
 				persistTimeline(context);
@@ -819,7 +897,8 @@ public class GraphServiceImpl implements GraphService {
 			if (PlannerNode.class.getSimpleName().equals(node)) {
 				multiTurnContextManager.appendPlannerChunk(getMultiTurnContextId(context), chunk);
 			}
-			boolean isClarificationNode = ClarificationNode.class.getSimpleName().equals(node);
+			boolean isClarificationNode = ClarificationNode.class.getSimpleName().equals(node)
+					|| EarlyClarificationNode.class.getSimpleName().equals(node);
 			GraphNodeResponse response = GraphNodeResponse.builder()
 				.agentId(request.getAgentId())
 				.threadId(threadId)

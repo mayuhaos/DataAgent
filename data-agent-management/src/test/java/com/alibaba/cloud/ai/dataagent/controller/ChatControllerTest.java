@@ -71,7 +71,7 @@ class ChatControllerTest {
 			.title("New Session")
 			.status("active")
 			.build();
-		when(chatSessionService.createSession(1, "New Session", null, null)).thenReturn(session);
+		when(chatSessionService.createSession(1, "New Session", null)).thenReturn(session);
 
 		ResponseEntity<ChatSession> result = chatController.createSession(1, Map.of("title", "New Session"));
 
@@ -83,12 +83,24 @@ class ChatControllerTest {
 	@Test
 	void createSession_nullBody_createsWithNulls() {
 		ChatSession session = ChatSession.builder().id("uuid-2").agentId(1).build();
-		when(chatSessionService.createSession(1, null, null, null)).thenReturn(session);
+		when(chatSessionService.createSession(1, null, null)).thenReturn(session);
 
 		ResponseEntity<ChatSession> result = chatController.createSession(1, null);
 
 		assertEquals(200, result.getStatusCode().value());
 		assertEquals("uuid-2", result.getBody().getId());
+	}
+
+	@Test
+	void createSession_ignoresClientModelAndUsesServerDefault() {
+		ChatSession session = ChatSession.builder().id("uuid-3").agentId(1).build();
+		when(chatSessionService.createSession(1, "New Session", null)).thenReturn(session);
+
+		ResponseEntity<ChatSession> result = chatController.createSession(1,
+				Map.of("title", "New Session", "modelConfigId", 999));
+
+		assertEquals(200, result.getStatusCode().value());
+		verify(chatSessionService).createSession(1, "New Session", null);
 	}
 
 	@Test
@@ -280,6 +292,18 @@ class ChatControllerTest {
 	}
 
 	@Test
+	void getAgentSessions_backfillsMissingDefaultTitles() {
+		ChatSession session = ChatSession.builder().id("s1").agentId(1).title("新会话").build();
+		when(chatSessionService.findByAgentId(1)).thenReturn(List.of(session));
+		when(chatMessageService.findBySessionId("s1")).thenReturn(List.of(
+				ChatMessage.builder().role("user").content("查询本月合格率").build()));
+
+		chatController.getAgentSessions(1);
+
+		verify(sessionTitleService).scheduleTitleGeneration("s1", "查询本月合格率");
+	}
+
+	@Test
 	void clearAgentSessions_returns200() {
 		doNothing().when(chatSessionService).clearSessionsByAgentId(1);
 
@@ -305,6 +329,7 @@ class ChatControllerTest {
 		assertEquals(200, result.getStatusCode().value());
 		assertEquals("Hello", result.getBody().getContent());
 		verify(chatSessionService).updateSessionTime("uuid-1");
+		verify(sessionTitleService).scheduleTitleGeneration("uuid-1", "Hello");
 	}
 
 	@Test
@@ -325,6 +350,24 @@ class ChatControllerTest {
 		chatController.saveMessage("uuid-1", dto);
 
 		verify(sessionTitleService).scheduleTitleGeneration("uuid-1", "What is AI?");
+	}
+
+	@Test
+	void saveMessage_assistantResponse_doesNotScheduleTitleGeneration() {
+		ChatMessageDTO dto = new ChatMessageDTO();
+		dto.setRole("assistant");
+		dto.setContent("Answer");
+
+		when(chatMessageService.saveMessage(any())).thenReturn(ChatMessage.builder()
+			.id(1L)
+			.sessionId("uuid-1")
+			.role("assistant")
+			.content("Answer")
+			.build());
+
+		chatController.saveMessage("uuid-1", dto);
+
+		verifyNoInteractions(sessionTitleService);
 	}
 
 	@Test

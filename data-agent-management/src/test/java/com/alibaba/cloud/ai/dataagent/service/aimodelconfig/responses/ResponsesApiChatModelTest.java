@@ -137,9 +137,9 @@ class ResponsesApiChatModelTest {
 
 		ArgumentCaptor<ResponsesRequest> captor = ArgumentCaptor.forClass(ResponsesRequest.class);
 		verify(responsesApi).call(captor.capture());
-		assertNotNull(captor.getValue().thinking());
-		assertEquals("enabled", captor.getValue().thinking().type());
-		assertEquals("high", captor.getValue().reasoningEffort());
+		assertNull(captor.getValue().thinking());
+		assertNotNull(captor.getValue().reasoning());
+		assertEquals("high", captor.getValue().reasoning().effort());
 	}
 
 	@Test
@@ -159,8 +159,24 @@ class ResponsesApiChatModelTest {
 
 		ArgumentCaptor<ResponsesRequest> captor = ArgumentCaptor.forClass(ResponsesRequest.class);
 		verify(responsesApi).call(captor.capture());
-		assertEquals("disabled", captor.getValue().thinking().type());
-		assertNull(captor.getValue().reasoningEffort());
+		assertNull(captor.getValue().thinking());
+		assertNotNull(captor.getValue().reasoning());
+		assertEquals("none", captor.getValue().reasoning().effort());
+	}
+
+	@Test
+	void call_qwenRuntimeOptionsUsesEnableThinking() {
+		when(responsesApi.call(any())).thenReturn(completedResponse("ok"));
+		OpenAiChatOptions runtimeOptions = OpenAiChatOptions.builder()
+			.extraBody(java.util.Map.of("enable_thinking", false))
+			.build();
+
+		chatModel.call(new Prompt(List.of(new UserMessage("hi")), runtimeOptions));
+
+		ArgumentCaptor<ResponsesRequest> captor = ArgumentCaptor.forClass(ResponsesRequest.class);
+		verify(responsesApi).call(captor.capture());
+		assertEquals(false, captor.getValue().enableThinking());
+		assertNull(captor.getValue().reasoning());
 	}
 
 	@Test

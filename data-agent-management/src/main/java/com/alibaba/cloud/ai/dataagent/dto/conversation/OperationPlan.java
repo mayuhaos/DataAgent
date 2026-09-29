@@ -73,6 +73,12 @@ public class OperationPlan {
 		private List<String> y = new ArrayList<>();
 		private String title;
 		private List<String> visibleFields = new ArrayList<>();
+		/** Display-only axis bounds. These must never be interpreted as data filters. */
+		private Double xAxisMin;
+		private Double xAxisMax;
+		private Double yAxisMin;
+		private Double yAxisMax;
+		private Boolean legendVisible;
 	}
 
 	@Data

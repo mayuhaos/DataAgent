@@ -34,6 +34,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 import static com.alibaba.cloud.ai.dataagent.constant.Constant.*;
 import static org.junit.jupiter.api.Assertions.*;
@@ -309,12 +310,36 @@ class SqlGenerateNodeTest {
 
 		when(properties.getMaxSqlRetryCount()).thenReturn(10);
 		when(nl2SqlService.generateSql(any())).thenReturn(Flux.just("```sql\nSELECT * FROM users\n```"));
-		when(nl2SqlService.sqlTrim(any())).thenReturn("SELECT * FROM users");
+		when(nl2SqlService.sqlTrim(any(), any())).thenReturn("SELECT * FROM users");
 
 		Map<String, Object> result = sqlGenerateNode.apply(state);
 		assertNotNull(result);
 		assertTrue(result.containsKey(SQL_GENERATE_OUTPUT));
 		assertNotNull(result.get(SQL_GENERATE_OUTPUT));
+	}
+
+	@Test
+	void apply_doesNotStreamModelThinkingProcess() throws Exception {
+		OverAllState state = createTestState();
+		setupBasicState(state);
+
+		when(properties.getMaxSqlRetryCount()).thenReturn(10);
+		when(nl2SqlService.generateSql(any())).thenReturn(Flux.just(
+				"# 思考：先确认查询范围\n", "SELECT * FROM users"));
+		when(nl2SqlService.sqlTrim(any(), any())).thenReturn("SELECT * FROM users");
+
+		Map<String, Object> result = sqlGenerateNode.apply(state);
+		@SuppressWarnings("unchecked")
+		List<com.alibaba.cloud.ai.graph.GraphResponse<com.alibaba.cloud.ai.graph.streaming.StreamingOutput>> responses =
+				((Flux<com.alibaba.cloud.ai.graph.GraphResponse<com.alibaba.cloud.ai.graph.streaming.StreamingOutput>>) result
+						.get(SQL_GENERATE_OUTPUT)).collectList().block();
+		String streamedText = responses.stream()
+			.filter(response -> !response.isDone())
+			.map(response -> response.getOutput().join().chunk())
+			.collect(Collectors.joining());
+
+		assertFalse(streamedText.contains("思考"));
+		assertTrue(streamedText.contains("SELECT * FROM users"));
 	}
 
 }

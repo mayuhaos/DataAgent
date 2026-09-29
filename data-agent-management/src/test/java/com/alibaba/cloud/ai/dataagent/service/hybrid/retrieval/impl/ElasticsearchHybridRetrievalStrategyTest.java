@@ -16,6 +16,7 @@
 package com.alibaba.cloud.ai.dataagent.service.hybrid.retrieval.impl;
 
 import co.elastic.clients.elasticsearch.ElasticsearchClient;
+import co.elastic.clients.elasticsearch.core.SearchResponse;
 import com.alibaba.cloud.ai.dataagent.dto.search.HybridSearchRequest;
 import com.alibaba.cloud.ai.dataagent.service.hybrid.fusion.FusionStrategy;
 import org.junit.jupiter.api.BeforeEach;
@@ -31,6 +32,7 @@ import org.springframework.ai.vectorstore.filter.Filter;
 import org.springframework.ai.vectorstore.filter.FilterExpressionBuilder;
 
 import java.io.IOException;
+import java.net.SocketTimeoutException;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.ExecutorService;
@@ -103,6 +105,40 @@ class ElasticsearchHybridRetrievalStrategyTest {
 		List<Document> result = strategy.getDocumentsByKeywords(request);
 
 		assertTrue(result.isEmpty());
+	}
+
+	@SuppressWarnings("unchecked")
+	@Test
+	void getDocumentsByKeywords_timeout_retriesThenSucceeds() throws IOException {
+		when(vectorStore.getNativeClient()).thenReturn(Optional.of(esClient));
+		SearchResponse<Document> response = mock(SearchResponse.class);
+		when(response.hits()).thenReturn(mock(co.elastic.clients.elasticsearch.core.search.HitsMetadata.class));
+		when(response.hits().hits()).thenReturn(List.of());
+		when(esClient.search(any(co.elastic.clients.elasticsearch.core.SearchRequest.class), eq(Document.class)))
+			.thenThrow(new SocketTimeoutException("timed out"))
+			.thenThrow(new IOException("Operation timed out"))
+			.thenThrow(new SocketTimeoutException("timed out"))
+			.thenReturn(response);
+
+		HybridSearchRequest request = HybridSearchRequest.builder().query("test query").topK(10).build();
+
+		assertDoesNotThrow(() -> strategy.getDocumentsByKeywords(request));
+		verify(esClient, times(4)).search(any(co.elastic.clients.elasticsearch.core.SearchRequest.class), eq(Document.class));
+	}
+
+	@SuppressWarnings("unchecked")
+	@Test
+	void getDocumentsByKeywords_timeoutAfterThreeRetries_throwsError() throws IOException {
+		when(vectorStore.getNativeClient()).thenReturn(Optional.of(esClient));
+		when(esClient.search(any(co.elastic.clients.elasticsearch.core.SearchRequest.class), eq(Document.class)))
+			.thenThrow(new SocketTimeoutException("timed out"));
+
+		HybridSearchRequest request = HybridSearchRequest.builder().query("test query").topK(10).build();
+
+		RuntimeException exception = assertThrows(RuntimeException.class,
+				() -> strategy.getDocumentsByKeywords(request));
+		assertTrue(exception.getMessage().contains("timed out after 3 retries"));
+		verify(esClient, times(4)).search(any(co.elastic.clients.elasticsearch.core.SearchRequest.class), eq(Document.class));
 	}
 
 	@SuppressWarnings("unchecked")

@@ -19,6 +19,7 @@ import static com.alibaba.cloud.ai.dataagent.constant.Constant.*;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import java.util.Map;
@@ -32,6 +33,7 @@ import org.mockito.junit.jupiter.MockitoSettings;
 import org.mockito.quality.Strictness;
 
 import com.alibaba.cloud.ai.dataagent.enums.TextType;
+import com.alibaba.cloud.ai.dataagent.dto.prompt.IntentRecognitionOutputDTO;
 import com.alibaba.cloud.ai.dataagent.service.llm.LlmService;
 import com.alibaba.cloud.ai.dataagent.util.ChatResponseUtil;
 import com.alibaba.cloud.ai.dataagent.util.JsonParseUtil;
@@ -89,6 +91,32 @@ class IntentRecognitionNodeTest {
 
 		assertNotNull(result);
 		assertTrue(result.containsKey(INTENT_RECOGNITION_NODE_OUTPUT));
+	}
+
+	@Test
+	void incompleteChartEdit_bypassesLlmAndRequestsClarification() throws Exception {
+		OverAllState state = createTestState();
+		state.updateState(Map.of(INPUT_KEY, "可以把上面这张图的 y", MULTI_TURN_CONTEXT, "(无)"));
+
+		Map<String, Object> result = intentRecognitionNode.apply(state);
+
+		IntentRecognitionOutputDTO output = (IntentRecognitionOutputDTO) result.get(INTENT_RECOGNITION_NODE_OUTPUT);
+		assertEquals("《需要澄清》", output.getClassification());
+		assertTrue(output.getResponse().contains("Y 轴"));
+		verifyNoInteractions(llmService);
+	}
+
+	@Test
+	void incompleteClarificationReply_bypassesLlmAndRequestsAnotherClarification() throws Exception {
+		OverAllState state = createTestState();
+		state.updateState(Map.of(INPUT_KEY, "原始问题：可以把上面这张图的 y\n澄清问题1：请说明 Y 轴属性\n用户补充1：帮我把 y\n"
+				+ "请基于以上原始问题和补充条件，继续完成数据分析查询。", MULTI_TURN_CONTEXT, "(无)"));
+
+		Map<String, Object> result = intentRecognitionNode.apply(state);
+
+		IntentRecognitionOutputDTO output = (IntentRecognitionOutputDTO) result.get(INTENT_RECOGNITION_NODE_OUTPUT);
+		assertEquals("《需要澄清》", output.getClassification());
+		verifyNoInteractions(llmService);
 	}
 
 	@Test

@@ -21,6 +21,7 @@ import com.alibaba.cloud.ai.dataagent.service.aimodelconfig.responses.ResponsesA
 import com.alibaba.cloud.ai.dataagent.service.aimodelconfig.responses.ResponsesApi.ResponsesRequest;
 import com.alibaba.cloud.ai.dataagent.service.aimodelconfig.responses.ResponsesApi.ResponsesResponse;
 import com.alibaba.cloud.ai.dataagent.service.aimodelconfig.responses.ResponsesApi.ResponsesUsage;
+import com.alibaba.cloud.ai.dataagent.service.aimodelconfig.responses.ResponsesApi.Reasoning;
 import com.alibaba.cloud.ai.dataagent.service.aimodelconfig.responses.ResponsesApi.Thinking;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.messages.AssistantMessage;
@@ -171,6 +172,7 @@ public class ResponsesApiChatModel implements ChatModel {
 		Integer maxTokens = defaultOptions.getMaxTokens();
 		String reasoningEffort = defaultOptions.getReasoningEffort();
 		Thinking thinking = extractThinking(defaultOptions.getExtraBody());
+		Boolean enableThinking = extractEnableThinking(defaultOptions.getExtraBody());
 
 		ChatOptions runtimeOptions = prompt.getOptions();
 		if (runtimeOptions != null) {
@@ -188,6 +190,10 @@ public class ResponsesApiChatModel implements ChatModel {
 					reasoningEffort = openAiOptions.getReasoningEffort();
 				}
 				Thinking runtimeThinking = extractThinking(openAiOptions.getExtraBody());
+				Boolean runtimeEnableThinking = extractEnableThinking(openAiOptions.getExtraBody());
+				if (runtimeEnableThinking != null) {
+					enableThinking = runtimeEnableThinking;
+				}
 				if (runtimeThinking != null) {
 					thinking = runtimeThinking;
 					if ("disabled".equalsIgnoreCase(runtimeThinking.type())) {
@@ -197,8 +203,14 @@ public class ResponsesApiChatModel implements ChatModel {
 			}
 		}
 
-		return new ResponsesRequest(model, instructions, inputItems, temperature, maxTokens, thinking,
-				reasoningEffort, stream);
+		if (enableThinking != null) {
+			return new ResponsesRequest(model, instructions, inputItems, temperature, maxTokens, null, null,
+					enableThinking, stream);
+		}
+		String effort = "disabled".equalsIgnoreCase(thinking == null ? null : thinking.type()) ? "none"
+				: reasoningEffort;
+		return new ResponsesRequest(model, instructions, inputItems, temperature, maxTokens, null,
+				effort == null ? null : new Reasoning(effort), null, stream);
 	}
 
 	private Thinking extractThinking(Map<String, Object> extraBody) {
@@ -207,6 +219,13 @@ public class ResponsesApiChatModel implements ChatModel {
 		}
 		Object type = thinking.get("type");
 		return type == null ? null : new Thinking(type.toString());
+	}
+
+	private Boolean extractEnableThinking(Map<String, Object> extraBody) {
+		if (extraBody == null || !(extraBody.get("enable_thinking") instanceof Boolean enabled)) {
+			return null;
+		}
+		return enabled;
 	}
 
 	/**

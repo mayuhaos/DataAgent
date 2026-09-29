@@ -43,6 +43,8 @@ import org.springframework.http.server.reactive.ServerHttpResponse;
 import reactor.core.publisher.Flux;
 import reactor.test.StepVerifier;
 
+import java.time.Duration;
+
 @ExtendWith(MockitoExtension.class)
 class ConversationControllerTest {
 
@@ -87,6 +89,26 @@ class ConversationControllerTest {
 		assertEquals("s1", requestCaptor.getValue().getConversationId());
 		assertEquals("thread-1", requestCaptor.getValue().getThreadId());
 		assertEquals("topic-1", requestCaptor.getValue().getTopicId());
+	}
+
+	@Test
+	void requeryStreamEmitsHeartbeatsAndNotifiesGraphOnDisconnect() {
+		OperationPlan plan = new OperationPlan();
+		plan.setExecutionMode(OperationPlan.ExecutionMode.REQUERY);
+		when(conversationService.submit(any(), any())).thenReturn(ConversationMessageResponse.builder()
+				.sessionId("s1").agentId("7").topicId("topic-1").threadId("thread-1").plan(plan)
+				.status("DISPATCH_TO_GRAPH").build());
+		ConversationMessageRequest request = new ConversationMessageRequest();
+		request.setUserMessage("华南呢");
+
+		StepVerifier.withVirtualTime(() -> controller.submit("s1", request, response))
+				.expectNextMatches(event -> "plan".equals(event.event()))
+				.thenAwait(Duration.ofSeconds(15))
+				.expectNextMatches(event -> "heartbeat".equals(event.comment()))
+				.thenCancel()
+				.verify();
+
+		verify(graphService).disconnectStream("thread-1");
 	}
 
 }

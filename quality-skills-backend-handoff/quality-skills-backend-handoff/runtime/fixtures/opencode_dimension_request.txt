@@ -1,0 +1,16 @@
+You are quality-python-planner. Load and follow the quality-python Skill. Return only one valid JSON AnalysisSpec.
+
+User question: 2026年9月14日的一厂后背门外饰板总成，哪些测量点位波动较大？
+
+Canonical query: 查询一厂（factory_id=1）尺寸表中2026-09-14后背门外饰板总成的测量点位数据，按产品和测量点位计算极差、标准差、极差占完整公差带比例；若样本数达到125，再计算 Cpk/Ppk。
+
+Available row fields: part_name, measurement_point, sample_no, value, lower_limit, upper_limit.
+
+Select dimension_variation_v1 and use these supplied rules:
+candidate_fraction=0.15
+range_ratio_high=0.5
+range_ratio_medium=0.3
+std_divisor=6
+minimum_cpk_samples=125
+cpk_threshold=1.33
+trend_slope_factor=0.5

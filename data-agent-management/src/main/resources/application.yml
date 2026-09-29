@@ -29,6 +29,11 @@ spring:
     username: ${DATA_AGENT_DATASOURCE_USERNAME:root}
     password: ${DATA_AGENT_DATASOURCE_PASSWORD:Hangju@2025@root}
     driver-class-name: com.mysql.cj.jdbc.Driver
+    hikari:
+      max-lifetime: 600000
+      keepalive-time: 120000
+      validation-timeout: 5000
+      connection-timeout: 10000
   sql:
     init:
       mode: ${DATA_AGENT_DATASOURCE_SQL_INIT:never}
@@ -83,6 +88,15 @@ spring:
           artifact-format-columns: ${DATA_AGENT_LINEAGE_ARTIFACT_FORMAT_COLUMNS:artifact_format,source_format}
           ingestion-tool-columns: ${DATA_AGENT_LINEAGE_INGESTION_TOOL_COLUMNS:ingestion_tool}
         llm-service-type: stream
+        quality-skill:
+          # Keep disabled until the remote OpenCode deployment and provider credentials pass health checks.
+          enabled: ${DATA_AGENT_QUALITY_SKILL_ENABLED:false}
+          base-url: ${DATA_AGENT_QUALITY_SKILL_BASE_URL:}
+          username: ${DATA_AGENT_QUALITY_SKILL_USERNAME:opencode}
+          password: ${DATA_AGENT_QUALITY_SKILL_PASSWORD:}
+          provider-id: ${DATA_AGENT_QUALITY_SKILL_PROVIDER_ID:}
+          model-id: ${DATA_AGENT_QUALITY_SKILL_MODEL_ID:}
+          timeout-seconds: ${DATA_AGENT_QUALITY_SKILL_TIMEOUT_SECONDS:45}
         # A stalled provider request fails after this interval; every streaming chunk resets it.
         llm-response-timeout: ${DATA_AGENT_LLM_RESPONSE_TIMEOUT:90s}
         code-executor:
@@ -131,6 +145,7 @@ mybatis:
 # 日志配置
 logging:
   level:
+    node-trace: info
     com.alibaba.cloud.ai.dataagent.service: debug
     com.alibaba.cloud.ai.dataagent.workflow.node: debug
     com.alibaba.cloud.ai.mapper: debug

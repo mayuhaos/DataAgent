@@ -258,7 +258,9 @@ export const useChatStore = defineStore('chat', () => {
 	}
 
 	async function createNewSession(agentId: number) {
-		const newSession = await chatService.createSession(agentId, '新会话', undefined, activeModelConfig.value?.id);
+		// A new conversation must bind to the server's current default CHAT model.
+		// The current session may deliberately be pinned to another model.
+		const newSession = await chatService.createSession(agentId, '新会话');
 		sessions.value.unshift(newSession);
 		await selectSession(newSession);
 		return newSession;
@@ -448,49 +450,54 @@ export const useChatStore = defineStore('chat', () => {
 
 	// ── Message send & stream ───────────────────────────────────────────────────
 	async function sendMessage(query: string) {
-		if (!currentSession.value) return;
+		if (!currentSession.value || isStreaming.value) return;
 
-		const needsTitle =
-			!currentSession.value.title || currentSession.value.title === '新会话';
-		const userMessage: ChatMessage = {
-			sessionId: currentSession.value.id,
-			role: 'user',
-			content: query,
-			messageType: 'text',
-			titleNeeded: needsTitle,
-		};
+		// Lock before the asynchronous message write. Otherwise rapid clicks can all
+		// pass the isStreaming check before the first write finishes.
+		isStreaming.value = true;
 
-		const saved = await chatService.saveMessage(
-			currentSession.value.id,
-			userMessage,
-		);
-		currentMessages.value.push(saved);
+		try {
+			const needsTitle =
+				!currentSession.value.title || currentSession.value.title === '新会话';
+			const userMessage: ChatMessage = {
+				sessionId: currentSession.value.id,
+				role: 'user',
+				content: query,
+				messageType: 'text',
+				titleNeeded: needsTitle,
+			};
 
-		const sessionState = getSessionState(currentSession.value.id);
-		const isClarificationReply = sessionState.awaitingClarification;
-		const previousClarificationCount = sessionState.clarificationCount;
-		const request: GraphRequest = {
-			agentId: String(currentAgentId.value || ''),
-			sessionId: currentSession.value.id,
-			query,
-			humanFeedback: requestOptions.value.humanFeedback,
-			nl2sqlOnly: requestOptions.value.nl2sqlOnly,
-			thinkingEnabled: requestOptions.value.thinkingEnabled,
-			reasoningEffort: requestOptions.value.reasoningEffort,
-			rejectedPlan: false,
-			humanFeedbackContent: undefined,
-			threadId: isClarificationReply ? sessionState.lastRequest?.threadId : undefined,
-			clarificationAnswer: isClarificationReply ? query : undefined,
-			resumeMode: isClarificationReply ? 'clarification' : null,
-		};
-		if (isClarificationReply) {
-			resetClarificationState(sessionState);
+			currentMessages.value.push(userMessage);
+
+			const sessionState = getSessionState(currentSession.value.id);
+			const isClarificationReply = sessionState.awaitingClarification;
+			const previousClarificationCount = sessionState.clarificationCount;
+			const request: GraphRequest = {
+				agentId: String(currentAgentId.value || ''),
+				sessionId: currentSession.value.id,
+				query,
+				humanFeedback: requestOptions.value.humanFeedback,
+				nl2sqlOnly: requestOptions.value.nl2sqlOnly,
+				thinkingEnabled: requestOptions.value.thinkingEnabled,
+				reasoningEffort: requestOptions.value.reasoningEffort,
+				rejectedPlan: false,
+				humanFeedbackContent: undefined,
+				threadId: isClarificationReply ? sessionState.lastRequest?.threadId : undefined,
+				clarificationAnswer: isClarificationReply ? query : undefined,
+				resumeMode: isClarificationReply ? 'clarification' : null,
+			};
+			if (isClarificationReply) {
+				resetClarificationState(sessionState);
+			}
+
+			await _sendGraphRequest(request, true, {
+				isClarificationReply,
+				previousClarificationCount,
+			});
+		} catch (error) {
+			isStreaming.value = false;
+			throw error;
 		}
-
-		await _sendGraphRequest(request, true, {
-			isClarificationReply,
-			previousClarificationCount,
-		});
 	}
 
 	async function _sendGraphRequest(
@@ -655,9 +662,16 @@ export const useChatStore = defineStore('chat', () => {
 			persistSessionState(sessionId);
 		}
 
-		const closeStream = await graphService.streamSearch(
-			request,
+		const startStream = (
+			onMessage: (response: GraphNodeResponse) => Promise<void>,
+			onError: (error: Error) => Promise<void>,
+			onComplete: () => Promise<void>,
+		) => graphService.streamConversation(request.sessionId!, request.query, onMessage, onError, onComplete);
+
+		const closeStream = await startStream(
 			async (response: GraphNodeResponse) => {
+				// ConversationPlan is routing metadata rather than user-visible output.
+				if (response.nodeName === 'ConversationPlan') return;
 				if (response.retrying) {
 					if (currentSession.value?.id === sessionId) {
 						appendTransientAssistantMessage(

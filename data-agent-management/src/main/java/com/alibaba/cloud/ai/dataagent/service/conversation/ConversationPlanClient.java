@@ -19,8 +19,14 @@ import com.alibaba.cloud.ai.dataagent.dto.conversation.OperationPlan;
 import com.alibaba.cloud.ai.dataagent.entity.AnalysisArtifact;
 import com.alibaba.cloud.ai.dataagent.entity.ConversationTopic;
 import java.util.List;
+import java.util.Map;
 
 public interface ConversationPlanClient {
 	OperationPlan plan(String userMessage, String sessionSummary, List<ConversationTopic> topics,
 			List<AnalysisArtifact> artifacts);
+
+	default OperationPlan plan(String userMessage, String sessionSummary, List<ConversationTopic> topics,
+			List<AnalysisArtifact> artifacts, Map<String, String> context) {
+		return plan(userMessage, sessionSummary, topics, artifacts);
+	}
 }

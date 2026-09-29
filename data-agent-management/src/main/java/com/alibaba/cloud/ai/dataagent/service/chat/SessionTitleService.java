@@ -18,7 +18,6 @@ package com.alibaba.cloud.ai.dataagent.service.chat;
 import com.alibaba.cloud.ai.dataagent.entity.ChatSession;
 import com.alibaba.cloud.ai.dataagent.service.aimodelconfig.AiModelRegistry;
 import com.alibaba.cloud.ai.dataagent.util.ChatResponseUtil;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.ai.chat.model.ChatResponse;
@@ -38,7 +37,6 @@ import java.util.concurrent.ExecutorService;
  */
 @Slf4j
 @Service
-@RequiredArgsConstructor
 public class SessionTitleService {
 
 	private static final String DEFAULT_TITLE = "新会话";
@@ -49,10 +47,17 @@ public class SessionTitleService {
 
 	private final AiModelRegistry aiModelRegistry;
 
-	@Qualifier("dbOperationExecutor")
 	private final ExecutorService executorService;
 
 	private final Set<String> runningTasks = ConcurrentHashMap.newKeySet();
+
+	public SessionTitleService(ChatSessionService chatSessionService, SessionEventPublisher sessionEventPublisher,
+			AiModelRegistry aiModelRegistry, @Qualifier("sessionTitleExecutor") ExecutorService executorService) {
+		this.chatSessionService = chatSessionService;
+		this.sessionEventPublisher = sessionEventPublisher;
+		this.aiModelRegistry = aiModelRegistry;
+		this.executorService = executorService;
+	}
 
 	public void scheduleTitleGeneration(String sessionId, String userMessage) {
 		if (!StringUtils.hasText(sessionId) || !StringUtils.hasText(userMessage)) {

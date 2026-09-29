@@ -56,6 +56,15 @@ class IntentRecognitionDispatcherTest {
 	}
 
 	@Test
+	void apply_clarificationIntent_routesToEarlyClarification() throws Exception {
+		OverAllState state = new OverAllState();
+		IntentRecognitionOutputDTO dto = TestFixtures.createIntentDTO("《需要澄清》");
+		state.updateState(Map.of(INTENT_RECOGNITION_NODE_OUTPUT, dto));
+
+		assertEquals(EARLY_CLARIFICATION_NODE, dispatcher.apply(state));
+	}
+
+	@Test
 	void apply_nullClassification_routesToEnd() throws Exception {
 		OverAllState state = new OverAllState();
 		IntentRecognitionOutputDTO dto = new IntentRecognitionOutputDTO();

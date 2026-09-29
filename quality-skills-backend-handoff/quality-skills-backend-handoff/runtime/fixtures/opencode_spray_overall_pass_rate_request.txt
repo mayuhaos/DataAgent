@@ -1,0 +1,9 @@
+You are quality-python-planner. Return only one valid JSON AnalysisSpec.
+
+User question: 2026年6月喷涂报表的产品总合格率。
+
+Canonical query: 查询一厂（factory_id=1）2026-06-01至2026-06-30喷涂批次的 Excel 来源总合格率 overall_pass_rate。该字段是来源拥有的指标，不能自行重算或平均；应用会在执行前检查整个范围内是否只有一个数值。你只需按 raw overall_pass_rate 分组，并统计来源批次数。
+
+Available row fields: overall_pass_rate, source_batch_count.
+
+Select tabular_aggregate_v1. Sum source_batch_count using the same output field name. Sort overall_pass_rate ascending. Do not add a derived metric.

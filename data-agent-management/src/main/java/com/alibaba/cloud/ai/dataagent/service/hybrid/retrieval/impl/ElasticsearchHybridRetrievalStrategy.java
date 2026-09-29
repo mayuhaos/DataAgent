@@ -33,6 +33,7 @@ import org.springframework.ai.vectorstore.filter.FilterExpressionConverter;
 import org.springframework.util.StringUtils;
 
 import java.io.IOException;
+import java.net.SocketTimeoutException;
 import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
@@ -46,6 +47,9 @@ public class ElasticsearchHybridRetrievalStrategy extends AbstractHybridRetrieva
 
 	// content
 	private static final String CONTENT = "content";
+
+	/** Maximum number of retries after the initial Elasticsearch request times out. */
+	private static final int MAX_TIMEOUT_RETRIES = 3;
 
 	private final FilterExpressionConverter filterConverter = new ElasticsearchAiSearchFilterExpressionConverter();
 
@@ -87,31 +91,60 @@ public class ElasticsearchHybridRetrievalStrategy extends AbstractHybridRetrieva
 			log.debug("Using filter: {}", filterString);
 		}
 
-		// 执行搜索
-		try {
-			SearchRequest searchRequest = buildSearchRequest(queryText, targetTopK, minScore, filterString);
+		SearchRequest searchRequest = buildSearchRequest(queryText, targetTopK, minScore, filterString);
 
-			// 执行搜索
-			SearchResponse<Document> response = client.search(searchRequest, Document.class);
+		// 远程 ES 偶发超时时重试，最终失败必须向上抛出，不能伪装成“未找到证据”。
+		for (int attempt = 0; attempt <= MAX_TIMEOUT_RETRIES; attempt++) {
+			try {
+				SearchResponse<Document> response = client.search(searchRequest, Document.class);
 
-			if (response == null || response.hits() == null) {
-				return Collections.emptyList();
+				if (response == null || response.hits() == null) {
+					return Collections.emptyList();
+				}
+
+				return response.hits()
+					.hits()
+					.stream()
+					.map(Hit::source)
+					.filter(Objects::nonNull)
+					.collect(Collectors.toList());
+
 			}
+			catch (IOException e) {
+				if (!isTimeout(e)) {
+					log.error("ElasticsearchClient search error", e);
+					// 非超时错误保持原有降级行为，让向量搜索继续兜底。
+					return Collections.emptyList();
+				}
 
-			// 结果转换
-			return response.hits()
-				.hits()
-				.stream()
-				.map(Hit::source)
-				.filter(Objects::nonNull)
-				.collect(Collectors.toList());
+				if (attempt == MAX_TIMEOUT_RETRIES) {
+					log.error("ElasticsearchClient search timed out after {} retries", MAX_TIMEOUT_RETRIES, e);
+					throw new RuntimeException("Elasticsearch keyword search timed out after "
+							+ MAX_TIMEOUT_RETRIES + " retries", e);
+				}
+				log.warn("ElasticsearchClient search timed out, retrying ({}/{})", attempt + 1,
+						MAX_TIMEOUT_RETRIES);
+			}
+		}
+		throw new IllegalStateException("Unreachable Elasticsearch search state");
+	}
 
+	private boolean isTimeout(Throwable throwable) {
+		Throwable current = throwable;
+		while (current != null) {
+			if (current instanceof SocketTimeoutException) {
+				return true;
+			}
+			String message = current.getMessage();
+			if (message != null) {
+				String normalizedMessage = message.toLowerCase();
+				if (normalizedMessage.contains("timeout") || normalizedMessage.contains("timed out")) {
+					return true;
+				}
+			}
+			current = current.getCause();
 		}
-		catch (IOException e) {
-			log.error("ElasticsearchClient search error", e);
-			// 关键词搜索失败不应该阻断整个流程，返回空列表让向量搜索兜底
-			return Collections.emptyList();
-		}
+		return false;
 	}
 
 	private SearchRequest buildSearchRequest(String queryText, int topK, Double minScore, String filterString) {

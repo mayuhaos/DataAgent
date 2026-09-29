@@ -32,12 +32,36 @@ export interface MarkdownRenderOptions {
 	streaming?: boolean;
 }
 
+function normalizeReportMarkdown(content: string): string {
+	const lines = content.replace(/\r\n?/g, '\n').split('\n');
+	let fenced = false;
+	let fenceMarker = '';
+	return lines
+		.map((line) => {
+			const fence = line.match(/^\s*(`{3,}|~{3,})/);
+			if (fence) {
+				if (!fenced) {
+					fenced = true;
+					fenceMarker = fence[1]![0]!;
+				} else if (fence[1]![0] === fenceMarker) fenced = false;
+				return line;
+			}
+			if (fenced) return line;
+			return line
+				.replace(/([^\s#])(#{1,6})(?=\S)/g, '$1\n$2 ')
+				.replace(/^(\s*#{1,6})(?!#)(\S)/, '$1 $2')
+				.replace(/^(\s*[-*+])(?![\s-])(\S)/, '$1 $2')
+				.replace(/^(\s*\d+[.)])(\S)/, '$1 $2');
+		})
+		.join('\n');
+}
+
 export function renderMarkdownContent(
 	content: string,
 	options: MarkdownRenderOptions = {},
 ): string {
 	if (!content) return '';
-	return md.render(content, options);
+	return md.render(normalizeReportMarkdown(content), options);
 }
 
 export { md };

@@ -40,8 +40,9 @@ const highlightPlugin = (md: MarkdownIt) => {
 		const token = tokens[idx];
 		const code = token.content;
 		const lang = token.info.trim();
+		const normalizedLang = lang.toLowerCase();
 
-		if (lang === 'echarts') {
+		if (normalizedLang === 'echarts') {
 			return originalFence(tokens, idx, options, env, slf);
 		}
 

@@ -16,6 +16,7 @@
 package com.alibaba.cloud.ai.dataagent.dto.conversation;
 
 import jakarta.validation.constraints.NotBlank;
+import java.util.Map;
 import lombok.Data;
 
 @Data
@@ -28,5 +29,8 @@ public class ConversationMessageRequest {
 	private String threadId;
 
 	private String agentId;
+
+	/** Server-provided scope constraints; never trust values from the user message. */
+	private Map<String, String> context = Map.of();
 
 }

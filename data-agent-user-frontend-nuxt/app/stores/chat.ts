@@ -118,6 +118,10 @@ export const useChatStore = defineStore('chat', () => {
 	let sessionEventSource: EventSource | null = null;
 	let sessionReconnectTimer: ReturnType<typeof setTimeout> | null = null;
 	let isStoreActive = true;
+	// A running session keeps its original transport while the user views another
+	// session. Reconnecting an already live transport replaces the server sink and
+	// leaves the original fetch/SSE connection without subsequent events.
+	const activeStreamSessionIds = new Set<string>();
 
 	const {
 		getSessionState,
@@ -357,7 +361,11 @@ export const useChatStore = defineStore('chat', () => {
 		currentMessages.value = await chatService.getSessionMessages(session.id);
 		const sessionState = getSessionState(session.id);
 		lastRequest.value = sessionState.lastRequest;
-		if (sessionState.isStreaming && sessionState.lastRequest?.threadId) {
+		if (
+			sessionState.isStreaming &&
+			sessionState.lastRequest?.threadId &&
+			!activeStreamSessionIds.has(session.id)
+		) {
 			await reconnectStreamingSession(session.id);
 		}
 		restoreClarificationStateFromMessages(sessionState);
@@ -443,45 +451,53 @@ export const useChatStore = defineStore('chat', () => {
 	// ── Message send & stream ───────────────────────────────────────────────────
 	async function sendMessage(query: string) {
 		if (!currentSession.value) return;
+		const sessionId = currentSession.value.id;
+		if (activeStreamSessionIds.has(sessionId)) return;
+		activeStreamSessionIds.add(sessionId);
 
-		const needsTitle =
-			!currentSession.value.title || currentSession.value.title === '新会话';
-		const userMessage: ChatMessage = {
-			sessionId: currentSession.value.id,
-			role: 'user',
-			content: query,
-			messageType: 'text',
-			titleNeeded: needsTitle,
-		};
+		try {
+			const needsTitle =
+				!currentSession.value.title || currentSession.value.title === '新会话';
+			const userMessage: ChatMessage = {
+				sessionId,
+				role: 'user',
+				content: query,
+				messageType: 'text',
+				titleNeeded: needsTitle,
+			};
 
-		const sessionState = getSessionState(currentSession.value.id);
-		const isClarificationReply = sessionState.awaitingClarification;
-		const previousClarificationCount = sessionState.clarificationCount;
-		const request: GraphRequest = {
-			agentId: String(currentAgentId.value || ''),
-			sessionId: currentSession.value.id,
-			query,
-			humanFeedback: requestOptions.value.humanFeedback,
-			nl2sqlOnly: requestOptions.value.nl2sqlOnly,
-			thinkingEnabled: requestOptions.value.thinkingEnabled,
-			reasoningEffort: requestOptions.value.reasoningEffort,
-			rejectedPlan: false,
-			humanFeedbackContent: undefined,
-			threadId: isClarificationReply
-				? sessionState.lastRequest?.threadId
-				: undefined,
-			clarificationAnswer: isClarificationReply ? query : undefined,
-			resumeMode: isClarificationReply ? 'clarification' : null,
-		};
-		if (isClarificationReply) {
-			resetClarificationState(sessionState);
+			const sessionState = getSessionState(sessionId);
+			const isClarificationReply = sessionState.awaitingClarification;
+			const previousClarificationCount = sessionState.clarificationCount;
+			const request: GraphRequest = {
+				agentId: String(currentAgentId.value || ''),
+				sessionId,
+				query,
+				humanFeedback: requestOptions.value.humanFeedback,
+				nl2sqlOnly: requestOptions.value.nl2sqlOnly,
+				thinkingEnabled: requestOptions.value.thinkingEnabled,
+				reasoningEffort: requestOptions.value.reasoningEffort,
+				rejectedPlan: false,
+				humanFeedbackContent: undefined,
+				threadId: isClarificationReply
+					? sessionState.lastRequest?.threadId
+					: undefined,
+				clarificationAnswer: isClarificationReply ? query : undefined,
+				resumeMode: isClarificationReply ? 'clarification' : null,
+			};
+			if (isClarificationReply) {
+				resetClarificationState(sessionState);
+			}
+			currentMessages.value.push(userMessage);
+
+			await _sendGraphRequest(request, true, {
+				isClarificationReply,
+				previousClarificationCount,
+			});
+		} catch (error) {
+			activeStreamSessionIds.delete(sessionId);
+			throw error;
 		}
-		currentMessages.value.push(userMessage);
-
-		await _sendGraphRequest(request, true, {
-			isClarificationReply,
-			previousClarificationCount,
-		});
 	}
 
 	async function _sendGraphRequest(
@@ -500,6 +516,7 @@ export const useChatStore = defineStore('chat', () => {
 		const sessionTitle = session.title;
 		const sessionState = getSessionState(sessionId);
 		const isReconnect = options.reconnect === true;
+		activeStreamSessionIds.add(sessionId);
 
 		lastRequest.value = request;
 		sessionState.lastRequest = request;
@@ -646,25 +663,11 @@ export const useChatStore = defineStore('chat', () => {
 			persistSessionState(sessionId);
 		}
 
-		const useConversationEntry =
-			request.sessionId &&
-			!options.isClarificationReply &&
-			!request.humanFeedback &&
-			!request.nl2sqlOnly;
 		const startStream = (
 			onMessage: (response: GraphNodeResponse) => Promise<void>,
 			onError: (error: Error) => Promise<void>,
 			onComplete: () => Promise<void>,
-		) =>
-			useConversationEntry
-				? graphService.streamConversation(
-						request.sessionId!,
-						request.query,
-						onMessage,
-						onError,
-						onComplete,
-					)
-				: graphService.streamSearch(request, onMessage, onError, onComplete);
+		) => graphService.streamConversation(request.sessionId!, request.query, onMessage, onError, onComplete);
 		const closeStream = await startStream(
 			async (response: GraphNodeResponse) => {
 				// ConversationPlan is routing metadata. It must not be rendered as a
@@ -784,6 +787,7 @@ export const useChatStore = defineStore('chat', () => {
 			},
 			async (error: Error) => {
 				console.error('Stream error:', error);
+				activeStreamSessionIds.delete(sessionId);
 				flushPendingSync();
 
 				if (options.reconnect) {
@@ -849,6 +853,7 @@ export const useChatStore = defineStore('chat', () => {
 				}
 			},
 			async () => {
+				activeStreamSessionIds.delete(sessionId);
 				flushPendingSync();
 
 				if (isClarificationStream) {
@@ -949,6 +954,7 @@ export const useChatStore = defineStore('chat', () => {
 			.stopStream(threadId, sessionId)
 			.catch((e) => console.error(e));
 		sessionState.closeStream();
+		activeStreamSessionIds.delete(sessionId);
 		sessionState.closeStream = null;
 		sessionState.isStreaming = false;
 		sessionState.isReportStreaming = false;
