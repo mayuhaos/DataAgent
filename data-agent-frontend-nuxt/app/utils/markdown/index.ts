@@ -36,24 +36,55 @@ function normalizeReportMarkdown(content: string): string {
 	const lines = content.replace(/\r\n?/g, '\n').split('\n');
 	let fenced = false;
 	let fenceMarker = '';
-	return lines
-		.map((line) => {
-			const fence = line.match(/^\s*(`{3,}|~{3,})/);
-			if (fence) {
-				if (!fenced) {
-					fenced = true;
-					fenceMarker = fence[1]![0]!;
-				} else if (fence[1]![0] === fenceMarker) fenced = false;
-				return line;
+	const normalized: string[] = [];
+	const isTableSeparator = (line: string) => {
+		const cells = line.trim().replace(/^\|/, '').replace(/\|$/, '').split('|');
+		return (
+			cells.length > 0 &&
+			cells.every((cell) => /^\s*:?-{3,}:?\s*$/.test(cell))
+		);
+	};
+
+	for (let index = 0; index < lines.length; index += 1) {
+		let line = lines[index]!;
+		const fence = line.match(/^\s*(`{3,}|~{3,})/);
+		if (fence) {
+			if (!fenced) {
+				fenced = true;
+				fenceMarker = fence[1]![0]!;
+			} else if (fence[1]![0] === fenceMarker) {
+				fenced = false;
 			}
-			if (fenced) return line;
-			return line
+			normalized.push(line);
+			continue;
+		}
+		if (!fenced) {
+			// A valid separator on the following line proves the pipe suffix is a table header.
+			const nextLine = lines[index + 1];
+			const firstPipe = line.indexOf('|');
+			if (
+				firstPipe > 0 &&
+				nextLine !== undefined &&
+				isTableSeparator(nextLine)
+			) {
+				const heading = line
+					.slice(0, firstPipe)
+					.trimEnd()
+					.replace(/^(\s*#{1,6})(?!#)(\S)/, '$1 $2');
+				const tableHeader = line.slice(firstPipe).trim();
+				normalized.push(heading, '', tableHeader);
+				continue;
+			}
+			line = line
 				.replace(/([^\s#])(#{1,6})(?=\S)/g, '$1\n$2 ')
 				.replace(/^(\s*#{1,6})(?!#)(\S)/, '$1 $2')
 				.replace(/^(\s*[-*+])(?![\s-])(\S)/, '$1 $2')
 				.replace(/^(\s*\d+[.)])(\S)/, '$1 $2');
-		})
-		.join('\n');
+		}
+		normalized.push(line);
+	}
+
+	return normalized.join('\n');
 }
 
 export function renderMarkdownContent(

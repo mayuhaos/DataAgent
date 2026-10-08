@@ -28,6 +28,7 @@ import com.alibaba.cloud.ai.graph.action.NodeAction;
 import com.alibaba.cloud.ai.graph.streaming.StreamingOutput;
 import com.alibaba.cloud.ai.dataagent.util.ChatResponseUtil;
 import com.alibaba.cloud.ai.dataagent.util.FluxUtil;
+import com.alibaba.cloud.ai.dataagent.util.MarkdownParserUtil;
 import com.alibaba.cloud.ai.dataagent.util.StateUtil;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.model.ChatResponse;
@@ -141,9 +142,10 @@ public class ReportGeneratorNode implements NodeAction {
 		// Use utility class to create streaming generator with content collection
 		Flux<GraphResponse<StreamingOutput>> generator = FluxUtil.createStreamingGeneratorWithMessages(this.getClass(),
 				state, "开始生成报告...", "报告生成完成！", reportContent -> {
-					log.info("Generated report content: {}", reportContent);
+					String normalizedReport = MarkdownParserUtil.normalizeReportMarkdown(reportContent);
+					log.info("Generated report content: {}", normalizedReport);
 					Map<String, Object> result = new HashMap<>();
-					result.put(RESULT, reportContent);
+					result.put(RESULT, normalizedReport);
 					result.put(SQL_EXECUTE_NODE_OUTPUT, null);
 					result.put(DATA_LINEAGE_SOURCES, null);
 					result.put(PLAN_CURRENT_STEP, null);

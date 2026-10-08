@@ -31,6 +31,7 @@ import com.alibaba.cloud.ai.dataagent.service.chat.ChatSessionService;
 import com.alibaba.cloud.ai.dataagent.service.chat.AnalysisArtifactService;
 import com.alibaba.cloud.ai.dataagent.service.conversation.AnalysisResultStore;
 import com.alibaba.cloud.ai.dataagent.util.JsonUtil;
+import com.alibaba.cloud.ai.dataagent.util.MarkdownParserUtil;
 import com.alibaba.cloud.ai.dataagent.util.SchemaSampleMasker;
 import com.alibaba.cloud.ai.dataagent.vo.GraphNodeResponse;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -708,7 +709,8 @@ public class GraphServiceImpl implements GraphService {
 		}
 		if (!report.isEmpty()) {
 			chatMessageService.saveMessage(ChatMessage.builder().sessionId(sessionId).role("assistant")
-					.messageType("markdown-report").content(report.toString()).build());
+					.messageType("markdown-report").content(MarkdownParserUtil.normalizeReportMarkdown(report.toString()))
+					.build());
 		}
 	}
 

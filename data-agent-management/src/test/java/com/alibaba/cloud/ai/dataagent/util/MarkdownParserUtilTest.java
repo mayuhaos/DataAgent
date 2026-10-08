@@ -17,7 +17,8 @@ package com.alibaba.cloud.ai.dataagent.util;
 
 import org.junit.jupiter.api.Test;
 
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 
 class MarkdownParserUtilTest {
 
@@ -67,4 +68,18 @@ class MarkdownParserUtilTest {
 		assertFalse(result.contains("\n"));
 	}
 
+	@Test
+	void normalizeReportMarkdown_splitsTextFromTableHeader() {
+		String malformed = "##二、口径对比|维度|数量|\n|---|---|\n|样本|15|";
+
+		assertEquals("## 二、口径对比\n\n|维度|数量|\n|---|---|\n|样本|15|",
+				MarkdownParserUtil.normalizeReportMarkdown(malformed));
+	}
+
+	@Test
+	void normalizeReportMarkdown_doesNotModifyFencedCode() {
+		String markdown = "~~~text\n标题|列\n|---|---|\n~~~";
+
+		assertEquals(markdown, MarkdownParserUtil.normalizeReportMarkdown(markdown));
+	}
 }
