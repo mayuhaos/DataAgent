@@ -45,7 +45,16 @@ class FeasibilityAssessmentDispatcherTest {
 	}
 
 	@Test
-	void apply_nonDataAnalysisOutput_routesToEnd() throws Exception {
+	void apply_needClarificationOutput_routesToClarificationNode() throws Exception {
+		OverAllState state = new OverAllState();
+		state.updateState(Map.of(FEASIBILITY_ASSESSMENT_NODE_OUTPUT,
+				result(FeasibilityAssessmentOutputDTO.RequirementType.NEED_CLARIFICATION)));
+
+		assertEquals(CLARIFICATION_NODE, dispatcher.apply(state));
+	}
+
+	@Test
+	void apply_freeChatOutput_routesToEnd() throws Exception {
 		OverAllState state = new OverAllState();
 		state.updateState(Map.of(FEASIBILITY_ASSESSMENT_NODE_OUTPUT,
 				result(FeasibilityAssessmentOutputDTO.RequirementType.FREE_CHAT)));

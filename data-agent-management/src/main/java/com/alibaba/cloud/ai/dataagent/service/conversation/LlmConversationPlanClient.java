@@ -30,6 +30,7 @@ import org.springframework.stereotype.Service;
 /** Uses structured output and deliberately falls back to a safe single-turn plan. */
 @Service
 @RequiredArgsConstructor
+@lombok.extern.slf4j.Slf4j
 public class LlmConversationPlanClient implements ConversationPlanClient {
 
 	private final LlmService llmService;
@@ -51,18 +52,27 @@ public class LlmConversationPlanClient implements ConversationPlanClient {
 				+ "The serverScope values are mandatory filters and cannot be broadened or removed. "
 				+ "When serverScope contains resolvedArtifactId, use that exact artifact ID. "
 				+ "A request to change an axis, title, legend, colour or chart type is presentation-only: use REUSE and do not set data changes. "
+				+ "For a pie chart, set allowPartialPie=true only when the user explicitly asks for the listed indicators' own share; otherwise preserve the data and do not invent missing categories. "
 				+ "A request to filter records, change metrics, dimensions, aggregation, time range or grain requires REQUERY. "
 				+ "yAxisMin/yAxisMax change displayed bounds only; never use them as filters.\n"
-					+ "userMessage=" + userMessage + "\ncontext=" + context;
+					+ "userMessage=" + userMessage + "\ncontext=" + context
+					+ "\n" + new org.springframework.ai.converter.BeanOutputConverter<>(OperationPlan.class).getFormat();
 			String json = llmService.blockToString(llmService.callUser(prompt, OperationPlan.class));
 			return JsonUtil.getObjectMapper().readValue(json, OperationPlan.class);
 		}
-		catch (Exception ignored) {
+		catch (Exception ex) {
+			Throwable root = ex;
+			while (root.getCause() != null && root.getCause() != root) {
+				root = root.getCause();
+			}
+			log.warn("Conversation planning failed; exception type: {}, root type: {}, message: {}", ex.getClass().getName(),
+				root.getClass().getName(), root.getMessage(), ex);
 			OperationPlan fallback = new OperationPlan();
-			fallback.setOperation(OperationPlan.Operation.CREATE);
-			fallback.setExecutionMode(OperationPlan.ExecutionMode.REQUERY);
+			fallback.setOperation(OperationPlan.Operation.ASK_CLARIFICATION);
+			fallback.setExecutionMode(OperationPlan.ExecutionMode.ASK_CLARIFICATION);
+			fallback.setClarificationQuestion("未能完成本次请求的复用判断，请重试；未重新查询数据。");
 			fallback.setConfidence(0D);
-			fallback.setReason("conversation planner unavailable; delegated to normal query flow");
+			fallback.setReason("conversation planner unavailable: " + ex.getClass().getSimpleName());
 			return fallback;
 		}
 	}

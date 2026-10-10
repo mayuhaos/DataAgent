@@ -91,9 +91,12 @@ class ModelConfigControllerTest {
 			.modelName("gpt-4")
 			.modelType("CHAT")
 			.build();
-		doNothing().when(modelConfigOpsService).testConnection(any(ModelConfigDTO.class));
+		doAnswer(invocation -> {
+			assertFalse(reactor.core.scheduler.Schedulers.isInNonBlockingThread());
+			return null;
+		}).when(modelConfigOpsService).testConnection(any(ModelConfigDTO.class));
 
-		ApiResponse<String> result = modelConfigController.testConnection(config);
+		ApiResponse<String> result = modelConfigController.testConnection(config).block();
 
 		assertTrue(result.isSuccess());
 	}

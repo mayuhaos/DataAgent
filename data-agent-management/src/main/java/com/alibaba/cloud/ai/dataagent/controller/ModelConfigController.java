@@ -24,6 +24,8 @@ import com.alibaba.cloud.ai.dataagent.vo.ModelCheckVo;
 import jakarta.validation.Valid;
 import lombok.AllArgsConstructor;
 import org.springframework.web.bind.annotation.*;
+import reactor.core.publisher.Mono;
+import reactor.core.scheduler.Schedulers;
 
 import java.util.List;
 
@@ -99,15 +101,19 @@ public class ModelConfigController {
 	 * 6. 连通性测试 接收前端表单里的配置参数，尝试发起一次真实调用
 	 */
 	@PostMapping("/test")
-	public ApiResponse<String> testConnection(@Valid @RequestBody ModelConfigDTO config) {
-		try {
-			modelConfigOpsService.testConnection(config);
-			return ApiResponse.success("连接测试成功！模型可用。");
-		}
-		catch (Exception e) {
-			// 捕获具体的错误信息（如 401 Invalid Key, 404 Not Found 等）返回给前端
-			return ApiResponse.error("连接测试失败: " + e.getMessage());
-		}
+	public Mono<ApiResponse<String>> testConnection(@Valid @RequestBody ModelConfigDTO config) {
+		// ChatModel.stream().block() is deliberately isolated from the WebFlux event
+		// loop; otherwise a healthy model is reported as a connection failure.
+		return Mono.<ApiResponse<String>>fromCallable(() -> {
+			try {
+				modelConfigOpsService.testConnection(config);
+				return ApiResponse.success("连接测试成功！模型可用。");
+			}
+			catch (Exception e) {
+				// 捕获具体的错误信息（如 401 Invalid Key, 404 Not Found 等）返回给前端
+				return ApiResponse.error("连接测试失败: " + e.getMessage());
+			}
+		}).subscribeOn(Schedulers.boundedElastic());
 	}
 
 	/**

@@ -228,6 +228,13 @@ class Nl2SqlServiceImplTest {
 	}
 
 	@Test
+	void sqlTrim_rejectsUnboundParametersButPreservesQuotedQuestionMarks() {
+		assertEquals("", nl2SqlService.sqlTrim("SELECT * FROM appearance_assessment WHERE report_id = ?"));
+		assertEquals("", nl2SqlService.sqlTrim("SELECT * FROM users WHERE id = :report_id"));
+		assertEquals("SELECT '?' AS label", nl2SqlService.sqlTrim("SELECT '?' AS label"));
+	}
+
+	@Test
 	void performSemanticConsistency_nullEvidence_buildsPrompt() {
 		SemanticConsistencyDTO dto = SemanticConsistencyDTO.builder()
 			.dialect("mysql")

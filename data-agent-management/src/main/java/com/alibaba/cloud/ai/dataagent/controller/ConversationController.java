@@ -70,7 +70,13 @@ public class ConversationController {
 			@RequestBody @Valid ConversationMessageRequest request, ServerHttpResponse response) {
 		response.getHeaders().add("Cache-Control", "no-cache");
 		response.getHeaders().add("Connection", "keep-alive");
-		ConversationMessageResponse prepared = conversationService.submit(sessionId, request);
+		return reactor.core.publisher.Mono.fromCallable(() -> conversationService.submit(sessionId, request))
+				.subscribeOn(reactor.core.scheduler.Schedulers.boundedElastic())
+				.flatMapMany(prepared -> executePrepared(sessionId, request, prepared));
+	}
+
+	private Flux<ServerSentEvent<GraphNodeResponse>> executePrepared(String sessionId,
+			ConversationMessageRequest request, ConversationMessageResponse prepared) {
 		GraphNodeResponse planEvent = GraphNodeResponse.builder().agentId(prepared.getAgentId())
 				.threadId(prepared.getThreadId()).nodeName("ConversationPlan").textType(com.alibaba.cloud.ai.dataagent.enums.TextType.JSON)
 				.text(toJson(prepared)).build();
@@ -86,7 +92,10 @@ public class ConversationController {
 					plan = plan.concatWithValues(ServerSentEvent.builder(report).event("message").build());
 				}
 			}
-			if (prepared.getMessage() != null && !prepared.getMessage().isBlank()) {
+			// CLARIFICATION is already persisted by ConversationService. Emitting the
+			// same text as a final answer makes the frontend persist it a second time.
+			if (!"CLARIFICATION".equals(prepared.getStatus()) && prepared.getMessage() != null
+					&& !prepared.getMessage().isBlank()) {
 				GraphNodeResponse localResult = GraphNodeResponse.builder().agentId(prepared.getAgentId())
 						.threadId(prepared.getThreadId()).nodeName("ConversationEdit")
 						.textType(com.alibaba.cloud.ai.dataagent.enums.TextType.FINAL_ANSWER)

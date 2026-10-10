@@ -85,7 +85,18 @@ public class ResponsesApi {
 		// 确保非流式
 		ResponsesRequest syncRequest = request.withStream(false);
 
-		return restClient.post().uri(this.responsesPath).body(syncRequest).retrieve().body(ResponsesResponse.class);
+		// Compatible providers may send the opening brace before the remaining JSON.
+		// Read the complete HTTP body before decoding rather than parsing live chunks.
+		String body = restClient.post().uri(this.responsesPath).body(syncRequest).retrieve().body(String.class);
+		try {
+			if (!StringUtils.hasText(body)) {
+				throw new IllegalStateException("Responses API returned an empty response");
+			}
+			return OBJECT_MAPPER.readValue(body, ResponsesResponse.class);
+		}
+		catch (JsonProcessingException ex) {
+			throw new IllegalStateException("Responses API returned invalid JSON (length=" + body.length() + ")", ex);
+		}
 	}
 
 	// ======================== 流式调用 ========================

@@ -110,12 +110,25 @@ class GraphService {
 					const events = buffer.split(/\r?\n\r?\n/);
 					buffer = events.pop() || '';
 					for (const event of events) {
+						if (closedIntentionally) return;
+						const eventName = event.split(/\r?\n/)
+							.find((line) => line.startsWith('event:'))?.slice(6).trim();
 						const data = event
 							.split(/\r?\n/)
 							.filter((line) => line.startsWith('data:'))
 							.map((line) => line.slice(5).trimStart())
 							.join('\n');
-						if (data) await onMessage(JSON.parse(data) as GraphNodeResponse);
+						const payload = data ? JSON.parse(data) as GraphNodeResponse : undefined;
+						if (eventName === 'error' || payload?.error) {
+							void reader.cancel().catch(() => {});
+							throw new Error(payload?.text || 'Stream processing failed');
+						}
+						if (payload) await onMessage(payload);
+						if (eventName === 'complete' || payload?.complete) {
+							void reader.cancel().catch(() => {});
+							if (!closedIntentionally && onComplete) await onComplete();
+							return;
+						}
 					}
 				}
 				if (!closedIntentionally && onComplete) await onComplete();
@@ -260,6 +273,7 @@ class GraphService {
 	async stopStream(threadId?: string, sessionId?: string): Promise<void> {
 		await axios.post(buildApiUrl(`${API_BASE_URL}/stream/search/stop`), null, {
 			params: { threadId, sessionId },
+			timeout: 5000,
 		});
 	}
 }

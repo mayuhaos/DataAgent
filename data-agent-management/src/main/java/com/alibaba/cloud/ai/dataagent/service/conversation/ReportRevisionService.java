@@ -30,6 +30,16 @@ public class ReportRevisionService {
 	private final AnalysisResultStore analysisResultStore;
 	private final LlmService llmService;
 
+	public String getContent(String sessionId, String contentRef) {
+		return analysisResultStore.get(sessionId, contentRef);
+	}
+
+	public String renderChart(AnalysisArtifact source, String presentationSpec) {
+		String content = "## 图表已更新\n\n```echarts\n" + presentationSpec
+				+ "\n```\n\n" + "统计口径和数据沿用原报表。\n";
+		return analysisResultStore.put(source.getSessionId(), content, Duration.ofHours(1));
+	}
+
 	public String revise(AnalysisArtifact source, OperationPlan.ReportChanges changes) {
 		if (source.getContentRef() == null) {
 			throw new IllegalStateException("report content unavailable");

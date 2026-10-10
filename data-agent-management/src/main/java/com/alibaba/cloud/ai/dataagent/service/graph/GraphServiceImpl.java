@@ -102,7 +102,7 @@ public class GraphServiceImpl implements GraphService {
 	private static final String RESUME_MODE_CLARIFICATION = "clarification";
 
 	private static final Pattern ECHARTS_BLOCK = Pattern
-		.compile("```echarts?\\s*\\R(\\{.*?})\\s*\\R```", Pattern.CASE_INSENSITIVE | Pattern.DOTALL);
+		.compile("```echarts?\\s*(\\{.*?})\\s*```", Pattern.CASE_INSENSITIVE | Pattern.DOTALL);
 
 	private static final long RECONNECT_GRACE_PERIOD_SECONDS = 45;
 
@@ -784,6 +784,7 @@ public class GraphServiceImpl implements GraphService {
 
 	private void persistReportCharts(AnalysisArtifact source, String report, java.time.LocalDateTime expireTime) {
 		Matcher matcher = ECHARTS_BLOCK.matcher(report);
+		int chartOrder = 0;
 		while (matcher.find()) {
 			String presentationSpec = matcher.group(1).trim();
 			try {
@@ -792,12 +793,35 @@ public class GraphServiceImpl implements GraphService {
 			catch (Exception ignored) {
 				continue;
 			}
+			chartOrder++;
 			analysisArtifactService.save(AnalysisArtifact.builder().sessionId(source.getSessionId()).topicId(source.getTopicId())
 					.parentArtifactId(source.getId()).type("CHART").inputSpec(source.getInputSpec())
 					.userQuestion(source.getUserQuestion()).sqlQuery(source.getSqlQuery()).resultRef(source.getResultRef())
 					.resultSchema(source.getResultSchema()).resultSample(source.getResultSample())
-					.resultSummary(source.getResultSummary()).presentationSpec(presentationSpec).provenance(source.getProvenance())
+					.resultSummary(source.getResultSummary()).presentationSpec(presentationSpec)
+					.provenance(chartProvenance(source, chartOrder))
 					.expireTime(expireTime).status("SUCCESS").build());
+		}
+	}
+
+	private String chartProvenance(AnalysisArtifact source, int chartOrder) {
+		try {
+			com.fasterxml.jackson.databind.node.ObjectNode provenance;
+			JsonNode existing = source.getProvenance() == null ? null
+					: JsonUtil.getObjectMapper().readTree(source.getProvenance());
+			if (existing != null && existing.isObject()) {
+				provenance = (com.fasterxml.jackson.databind.node.ObjectNode) existing.deepCopy();
+			}
+			else {
+				provenance = JsonUtil.getObjectMapper().createObjectNode();
+			}
+			provenance.put("chartOrder", chartOrder);
+			provenance.put("sourceQueryResultId", source.getId());
+			return JsonUtil.getObjectMapper().writeValueAsString(provenance);
+		}
+		catch (Exception ex) {
+			return "{\"chartOrder\":" + chartOrder + ",\"sourceQueryResultId\":\""
+					+ source.getId() + "\"}";
 		}
 	}
 

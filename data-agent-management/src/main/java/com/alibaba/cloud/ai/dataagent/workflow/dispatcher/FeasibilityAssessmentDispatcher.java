@@ -22,6 +22,7 @@ import com.alibaba.cloud.ai.graph.action.EdgeAction;
 import lombok.extern.slf4j.Slf4j;
 
 import static com.alibaba.cloud.ai.dataagent.constant.Constant.FEASIBILITY_ASSESSMENT_NODE_OUTPUT;
+import static com.alibaba.cloud.ai.dataagent.constant.Constant.CLARIFICATION_NODE;
 import static com.alibaba.cloud.ai.dataagent.constant.Constant.PLANNER_NODE;
 import static com.alibaba.cloud.ai.graph.StateGraph.END;
 
@@ -37,15 +38,25 @@ public class FeasibilityAssessmentDispatcher implements EdgeAction {
 		FeasibilityAssessmentOutputDTO result = StateUtil.getObjectValue(state, FEASIBILITY_ASSESSMENT_NODE_OUTPUT,
 				FeasibilityAssessmentOutputDTO.class);
 
-		if (result != null
-				&& result.getRequirementType() == FeasibilityAssessmentOutputDTO.RequirementType.DATA_ANALYSIS) {
-			log.info("[FeasibilityAssessmentNodeDispatcher]需求类型为数据分析，进入PlannerNode节点");
-			return PLANNER_NODE;
-		}
-		else {
-			log.info("[FeasibilityAssessmentNodeDispatcher]需求类型非数据分析，返回END节点");
+		if (result == null) {
+			log.warn("Feasibility assessment result could not be parsed, returning END");
 			return END;
 		}
+
+		return switch (result.getRequirementType()) {
+			case DATA_ANALYSIS -> {
+				log.info("[FeasibilityAssessmentNodeDispatcher]需求类型为数据分析，进入PlannerNode节点");
+				yield PLANNER_NODE;
+			}
+			case NEED_CLARIFICATION -> {
+				log.info("[FeasibilityAssessmentNodeDispatcher]需求需要澄清，进入ClarificationNode节点");
+				yield CLARIFICATION_NODE;
+			}
+			case FREE_CHAT -> {
+				log.info("[FeasibilityAssessmentNodeDispatcher]需求类型为自由闲聊，返回END节点");
+				yield END;
+			}
+		};
 	}
 
 }

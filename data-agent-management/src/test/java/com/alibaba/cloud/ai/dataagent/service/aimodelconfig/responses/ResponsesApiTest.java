@@ -44,6 +44,33 @@ class ResponsesApiTest {
 	}
 
 	@Test
+	void synchronousCallReadsAllResponseChunks() throws Exception {
+		var server = com.sun.net.httpserver.HttpServer.create(new java.net.InetSocketAddress(0), 0);
+		server.createContext("/v1/responses", exchange -> {
+			exchange.getRequestBody().readAllBytes();
+			exchange.getResponseHeaders().add("Content-Type", "application/json");
+			exchange.sendResponseHeaders(200, 0);
+			try (var output = exchange.getResponseBody()) {
+				output.write('{');
+				output.flush();
+				output.write("\"id\":\"chunked\",\"status\":\"completed\",\"output\":[]}"
+					.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+			}
+		});
+		server.start();
+		try {
+			var api = new ResponsesApi("http://localhost:" + server.getAddress().getPort(), "test-key", null,
+				RestClient.builder(), WebClient.builder());
+			var result = api.call(new ResponsesApi.ResponsesRequest("test", null, java.util.List.of(),
+				null, null, null, null, null, false));
+			assertEquals("chunked", result.id());
+		}
+		finally {
+			server.stop(0);
+		}
+	}
+
+	@Test
 	void parseDeltaEvent_returnsDeltaText() {
 		StreamEvent event = parse(
 				"{\"type\":\"response.output_text.delta\",\"output_index\":3,\"delta\":\"Hello\"}");

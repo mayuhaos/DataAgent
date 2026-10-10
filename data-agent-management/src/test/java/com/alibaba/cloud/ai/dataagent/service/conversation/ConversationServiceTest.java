@@ -75,6 +75,56 @@ class ConversationServiceTest {
 	}
 
 	@Test
+	void chartOnlyRequestReusesLatestResultWithoutCallingPlanner() {
+		var source = com.alibaba.cloud.ai.dataagent.entity.AnalysisArtifact.builder()
+				.id("chart-1").sessionId("session-1").type("CHART").sqlQuery("original SQL")
+				.resultRef("original-data").presentationSpec("{}").build();
+		when(analysisArtifactService.findBySessionId("session-1")).thenReturn(List.of(source));
+		when(artifactReferenceResolver.cards(any())).thenReturn(List.of(
+				new ArtifactReferenceResolver.Card("chart-1", "图表01", "点位")));
+		when(presentationSpecEditor.apply(any(), any())).thenReturn("{\"type\":\"bar\",\"series\":[]}");
+		when(reportRevisionService.renderChart(any(), any())).thenReturn("updated-report");
+		when(reportRevisionService.getContent("session-1", "updated-report"))
+				.thenReturn("```echarts\n{\"series\":[{\"type\":\"bar\",\"data\":[15,1]}]}\n```");
+		when(analysisArtifactService.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+		ConversationMessageRequest request = new ConversationMessageRequest();
+		request.setUserMessage("上面这个图用柱状图展示");
+		var result = service.submit("session-1", request);
+		assertEquals("LOCAL_EXECUTION", result.getStatus());
+		assertEquals(OperationPlan.ExecutionMode.REUSE, result.getPlan().getExecutionMode());
+		org.mockito.Mockito.verifyNoInteractions(conversationPlanClient);
+		verify(analysisArtifactService).save(org.mockito.ArgumentMatchers.argThat(a ->
+				"original-data".equals(a.getResultRef()) && "original SQL".equals(a.getSqlQuery())
+				&& "updated-report".equals(a.getContentRef())));
+		verify(chatMessageService).saveMessage(org.mockito.ArgumentMatchers.argThat(message ->
+				"markdown-report".equals(message.getMessageType()) && message.getContent().contains("\"bar\"")));
+	}
+
+	@Test
+	void aiPlannedChartEditPersistsTheRenderedReportForHistoryReload() {
+		String question = "帮我把下面这个饼状图换成柱状图。";
+		var source = com.alibaba.cloud.ai.dataagent.entity.AnalysisArtifact.builder()
+				.id("pie-1").sessionId("session-1").type("CHART")
+				.presentationSpec("{\"series\":[{\"type\":\"pie\"}]}").build();
+		when(analysisArtifactService.findBySessionId("session-1")).thenReturn(List.of(source));
+		OperationPlan plan = new OperationPlan();
+		plan.setExecutionMode(OperationPlan.ExecutionMode.REUSE);
+		plan.getTarget().setArtifactIds(List.of("pie-1"));
+		plan.getChanges().getPresentation().setChartType("bar");
+		when(conversationPlanClient.plan(eq(question), any(), any(), any())).thenReturn(plan);
+		when(presentationSpecEditor.apply(any(), any())).thenReturn("{\"series\":[{\"type\":\"bar\"}]}");
+		when(reportRevisionService.renderChart(any(), any())).thenReturn("new-content");
+		String report = "```echarts\n{\"series\":[{\"type\":\"bar\",\"data\":[81.72,18.07,0.21]}]}\n```";
+		when(reportRevisionService.getContent("session-1", "new-content")).thenReturn(report);
+		when(analysisArtifactService.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+		ConversationMessageRequest request = new ConversationMessageRequest();
+		request.setUserMessage(question);
+		assertEquals("LOCAL_EXECUTION", service.submit("session-1", request).getStatus());
+		verify(chatMessageService).saveMessage(org.mockito.ArgumentMatchers.argThat(message ->
+				"markdown-report".equals(message.getMessageType()) && report.equals(message.getContent())));
+	}
+
+	@Test
 	void usesNewThreadForEveryOrdinaryMessageAndDispatchesRequery() {
 		OperationPlan plan = new OperationPlan();
 		plan.setExecutionMode(OperationPlan.ExecutionMode.REQUERY);

@@ -24,10 +24,13 @@ import com.alibaba.druid.DbType;
 import com.alibaba.druid.sql.SQLUtils;
 import com.alibaba.druid.sql.ast.SQLStatement;
 import com.alibaba.druid.sql.ast.statement.SQLSelectStatement;
+import com.alibaba.druid.sql.ast.expr.SQLVariantRefExpr;
+import com.alibaba.druid.sql.visitor.SQLASTVisitorAdapter;
 import org.springframework.ai.chat.model.ChatResponse;
 import reactor.core.publisher.Flux;
 
 import java.util.function.Consumer;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -65,6 +68,20 @@ public interface Nl2SqlService {
 			try {
 				SQLStatement statement = SQLUtils.parseSingleStatement(candidate, dbType);
 				if (statement instanceof SQLSelectStatement) {
+					AtomicBoolean unboundParameter = new AtomicBoolean();
+					statement.accept(new SQLASTVisitorAdapter() {
+						@Override
+						public boolean visit(SQLVariantRefExpr parameter) {
+							String name = parameter.getName();
+							if (name != null && (name.startsWith("?") || name.startsWith(":"))) {
+								unboundParameter.set(true);
+							}
+							return true;
+						}
+					});
+					if (unboundParameter.get()) {
+						return "";
+					}
 					return candidate.trim();
 				}
 			}

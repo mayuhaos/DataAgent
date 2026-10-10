@@ -42,7 +42,7 @@ import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static com.alibaba.cloud.ai.dataagent.constant.Constant.*;
-import static com.alibaba.cloud.ai.dataagent.util.PlanProcessUtil.getCurrentExecutionStepInstruction;
+import static com.alibaba.cloud.ai.dataagent.util.PlanProcessUtil.getCurrentExecutionStepInstructionWithResults;
 
 /**
  * Enhanced SQL generation node that handles SQL query regeneration with advanced
@@ -83,7 +83,7 @@ public class SqlGenerateNode implements NodeAction {
 
 		// 获取planner分配的当前执行步骤的sql任务要求，每个步骤的sql任务是不同的。
 		// 不要拿 user query 这个总体的大任务。
-		String promptForSql = getCurrentExecutionStepInstruction(state);
+		String promptForSql = getCurrentExecutionStepInstructionWithResults(state);
 
 		// 准备生成SQL
 		String displayMessage;
@@ -121,6 +121,11 @@ public class SqlGenerateNode implements NodeAction {
 					StateUtil.getStringValue(state, DB_DIALECT_TYPE));
 			if (sql == null) {
 				sql = "";
+			}
+			if (sql.isBlank()) {
+				result.put(SQL_REGENERATE_REASON, SqlRetryDto.sqlExecute(
+						"Generate one executable read-only SELECT using actual completed-step results; "
+								+ "unbound parameters (?, :name) are not supported."));
 			}
 			validatedSql.set(sql);
 			return sql.isBlank() ? Flux.empty() : Flux.just(ChatResponseUtil.createPureResponse(sql));

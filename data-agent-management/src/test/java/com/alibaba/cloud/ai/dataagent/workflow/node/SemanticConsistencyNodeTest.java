@@ -36,6 +36,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
+import org.mockito.ArgumentCaptor;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.mockito.junit.jupiter.MockitoSettings;
 import org.mockito.quality.Strictness;
@@ -83,6 +84,23 @@ class SemanticConsistencyNodeTest {
 		state.updateState(Map.of(EVIDENCE, "test evidence", TABLE_RELATION_OUTPUT, createSimpleSchema(),
 				DB_DIALECT_TYPE, "mysql", SQL_GENERATE_OUTPUT, sql, QUERY_ENHANCE_NODE_OUTPUT, dto, PLANNER_NODE_OUTPUT,
 				planJson, PLAN_CURRENT_STEP, 1));
+	}
+
+	@Test
+	void dependentQuery_validationReceivesActualReportId() throws Exception {
+		OverAllState state = createTestState();
+		setupBasicState(state, "SELECT * FROM appearance_assessment WHERE report_id = 1");
+		state.registerKeyAndStrategy(SQL_EXECUTE_NODE_OUTPUT, new ReplaceStrategy());
+		state.updateState(Map.of(PLANNER_NODE_OUTPUT, TestFixtures.createMultiStepPlanJson(),
+				PLAN_CURRENT_STEP, 2, SQL_EXECUTE_NODE_OUTPUT,
+				Map.of("step_1", "{\"data\":[{\"id\":\"2\"}]}")));
+		when(nl2SqlService.performSemanticConsistency(any()))
+			.thenReturn(Flux.just(ChatResponseUtil.createPureResponse("{\"passed\":false,\"reason\":\"Wrong report ID\"}")));
+		semanticConsistencyNode.apply(state);
+		ArgumentCaptor<SemanticConsistencyDTO> captured = ArgumentCaptor.forClass(SemanticConsistencyDTO.class);
+		verify(nl2SqlService).performSemanticConsistency(captured.capture());
+		assertTrue(captured.getValue().getExecutionDescription().contains("\"id\":\"2\""));
+		assertTrue(captured.getValue().getExecutionDescription().contains("reject dependent filters"));
 	}
 
 	@Test

@@ -16,6 +16,7 @@
 package com.alibaba.cloud.ai.dataagent.workflow.node.sql;
 
 import com.alibaba.cloud.ai.dataagent.dto.datasource.SqlRetryDto;
+import com.alibaba.cloud.ai.dataagent.dto.prompt.SqlGenerationDTO;
 import com.alibaba.cloud.ai.dataagent.workflow.node.SqlGenerateNode;
 import com.alibaba.cloud.ai.dataagent.properties.DataAgentProperties;
 import com.alibaba.cloud.ai.dataagent.service.nl2sql.Nl2SqlService;
@@ -25,6 +26,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
+import org.mockito.ArgumentCaptor;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.mockito.junit.jupiter.MockitoSettings;
 import org.mockito.quality.Strictness;
@@ -40,6 +42,7 @@ import static com.alibaba.cloud.ai.dataagent.constant.Constant.*;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.verify;
 
 @ExtendWith(MockitoExtension.class)
 @MockitoSettings(strictness = Strictness.LENIENT)
@@ -117,6 +120,40 @@ class SqlGenerateNodeTest {
 		state.updateState(Map.of(SQL_GENERATE_COUNT, 0, PLANNER_NODE_OUTPUT, TEST_PLAN_JSON, PLAN_CURRENT_STEP, 1,
 				EVIDENCE, "test evidence", DB_DIALECT_TYPE, "mysql", QUERY_ENHANCE_NODE_OUTPUT, TEST_QUERY_ENHANCE,
 				TABLE_RELATION_OUTPUT, TEST_SCHEMA));
+	}
+
+	@Test
+	void dependentQuery_receivesActualReportIdOnGenerationAndRetry() throws Exception {
+		for (boolean retry : List.of(false, true)) {
+			OverAllState state = createTestState();
+			setupBasicState(state);
+			state.registerKeyAndStrategy(SQL_EXECUTE_NODE_OUTPUT, new ReplaceStrategy());
+			String plan = """
+					{"execution_plan":[
+					{"step":1,"tool_to_use":"sql_generate_node","tool_parameters":{"instruction":"Find report"}},
+					{"step":2,"tool_to_use":"sql_generate_node","tool_parameters":{"instruction":"Count samples using the report ID from step 1"}}
+					]}
+					""";
+			state.updateState(Map.of(PLANNER_NODE_OUTPUT, plan, PLAN_CURRENT_STEP, 2,
+					SQL_EXECUTE_NODE_OUTPUT, Map.of("step_1", "{\"data\":[{\"id\":\"2\"},{\"id\":\"7\"}]}",
+							"step_2", "STALE_CURRENT_RESULT", "step_3", "STALE_FUTURE_RESULT")));
+			if (retry) {
+				state.updateState(Map.of(SQL_REGENERATE_REASON, SqlRetryDto.sqlExecute("Unbound parameter"),
+						SQL_GENERATE_OUTPUT, "SELECT * FROM appearance_assessment WHERE report_id = ?"));
+			}
+			when(properties.getMaxSqlRetryCount()).thenReturn(10);
+			when(nl2SqlService.generateSql(any())).thenReturn(Flux.just("SELECT 1"));
+			sqlGenerateNode.apply(state);
+		}
+		ArgumentCaptor<SqlGenerationDTO> captured = ArgumentCaptor.forClass(SqlGenerationDTO.class);
+		verify(nl2SqlService, org.mockito.Mockito.times(2)).generateSql(captured.capture());
+		for (SqlGenerationDTO request : captured.getAllValues()) {
+			String instruction = request.getExecutionDescription();
+			assertTrue(instruction.contains("\"id\":\"2\""));
+			assertTrue(instruction.contains("\"id\":\"7\""));
+			assertFalse(instruction.contains("STALE_CURRENT_RESULT"));
+			assertFalse(instruction.contains("STALE_FUTURE_RESULT"));
+		}
 	}
 
 	@Test

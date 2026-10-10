@@ -27,6 +27,26 @@ class ArtifactReferenceResolverTest {
 	private final ArtifactReferenceResolver resolver = new ArtifactReferenceResolver();
 
 	@Test
+	void legacyQueryResultsAreSeparateReportGroups() {
+		AnalysisArtifact older = AnalysisArtifact.builder().id("old").type("QUERY_RESULT")
+				.presentationSpec("{\"type\":\"bar\"}").createTime(LocalDateTime.of(2026, 10, 9, 10, 0)).build();
+		AnalysisArtifact latest = AnalysisArtifact.builder().id("latest").type("QUERY_RESULT")
+				.presentationSpec("{\"type\":\"pie\"}").createTime(LocalDateTime.of(2026, 10, 9, 11, 0)).build();
+		assertEquals("latest", resolver.resolve("把这个图换成柱状图", List.of(older, latest)).artifact().getId());
+	}
+
+	@Test
+	void thisChartSelectsTheLatestReportRatherThanAnOlderReport() {
+		AnalysisArtifact older = AnalysisArtifact.builder().id("old").type("CHART").parentArtifactId("query-old")
+				.createTime(LocalDateTime.of(2026, 10, 9, 10, 0)).build();
+		AnalysisArtifact latest = AnalysisArtifact.builder().id("latest").type("CHART").parentArtifactId("query-new")
+				.createTime(LocalDateTime.of(2026, 10, 9, 11, 0)).build();
+		var result = resolver.resolve("把这个图换成饼状图", List.of(older, latest));
+		assertEquals(ArtifactReferenceResolver.Resolution.Status.RESOLVED, result.status());
+		assertEquals("latest", result.artifact().getId());
+	}
+
+	@Test
 	void resolvesStableChartNumber() {
 		ArtifactReferenceResolver.Resolution result = resolver.resolve("把图表 02 改成柱状图", charts());
 
@@ -86,6 +106,51 @@ class ArtifactReferenceResolverTest {
 		assertEquals(2, result.candidates().size());
 		assertEquals("图表 01｜生产数量指标", result.candidates().get(0).label());
 		assertEquals("图表 02｜合格率", result.candidates().get(1).label());
+	}
+
+	@Test
+	void resolvesOrdinalUsingReportChartOrderWhenIdsSortTheOtherWay() {
+		AnalysisArtifact first = AnalysisArtifact.builder().id("z-first").type("CHART").parentArtifactId("query")
+				.provenance("{\"chartOrder\":1,\"sourceQueryResultId\":\"query\"}")
+				.presentationSpec("{\"type\":\"bar\",\"title\":{\"text\":\"数量指标\"}}")
+				.createTime(LocalDateTime.of(2026, 10, 9, 10, 0)).build();
+		AnalysisArtifact second = AnalysisArtifact.builder().id("a-second").type("CHART").parentArtifactId("query")
+				.provenance("{\"chartOrder\":2,\"sourceQueryResultId\":\"query\"}")
+				.presentationSpec("{\"type\":\"bar\",\"title\":{\"text\":\"合格率指标\"}}")
+				.createTime(LocalDateTime.of(2026, 10, 9, 10, 0)).build();
+
+		ArtifactReferenceResolver.Resolution result = resolver.resolve("第一个图用饼状图展示",
+				List.of(second, first));
+
+		assertEquals(ArtifactReferenceResolver.Resolution.Status.RESOLVED, result.status());
+		assertEquals("z-first", result.artifact().getId());
+		assertEquals("图表 01｜数量指标", result.label());
+	}
+
+	@Test
+	void derivedChartKeepsOriginalOrderAndReplacesItsParent() {
+		AnalysisArtifact query = AnalysisArtifact.builder().id("query").type("QUERY_RESULT")
+				.presentationSpec("{\"type\":\"bar\"}")
+				.createTime(LocalDateTime.of(2026, 10, 9, 10, 0)).build();
+		AnalysisArtifact first = AnalysisArtifact.builder().id("first").type("CHART").parentArtifactId("query")
+				.provenance("{\"chartOrder\":1,\"sourceQueryResultId\":\"query\"}")
+				.presentationSpec("{\"type\":\"bar\",\"title\":{\"text\":\"数量指标\"}}")
+				.createTime(LocalDateTime.of(2026, 10, 9, 10, 1)).build();
+		AnalysisArtifact second = AnalysisArtifact.builder().id("second").type("CHART").parentArtifactId("query")
+				.provenance("{\"chartOrder\":2,\"sourceQueryResultId\":\"query\"}")
+				.presentationSpec("{\"type\":\"bar\",\"title\":{\"text\":\"合格率指标\"}}")
+				.createTime(LocalDateTime.of(2026, 10, 9, 10, 2)).build();
+		AnalysisArtifact derived = AnalysisArtifact.builder().id("derived-first").type("CHART").parentArtifactId("first")
+				.provenance(first.getProvenance())
+				.presentationSpec("{\"type\":\"pie\",\"title\":{\"text\":\"数量指标\"}}")
+				.createTime(LocalDateTime.of(2026, 10, 9, 10, 1)).build();
+
+		ArtifactReferenceResolver.Resolution result = resolver.resolve("第一个图用柱状图展示",
+				List.of(query, first, second, derived));
+
+		assertEquals(ArtifactReferenceResolver.Resolution.Status.RESOLVED, result.status());
+		assertEquals("derived-first", result.artifact().getId());
+		assertEquals("图表 01｜数量指标", result.label());
 	}
 
 	private List<AnalysisArtifact> charts() {

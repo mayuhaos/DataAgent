@@ -558,6 +558,7 @@ export const useChatStore = defineStore('chat', () => {
 		let streamedClarificationText = '';
 		let streamedClarificationCount = 0;
 		let streamedFinalAnswerText = '';
+		let backendPersistedClarification = false;
 		const transientFinalAnswerId = -Date.now();
 
 		function appendToCurrentBlock(response: GraphNodeResponse) {
@@ -670,9 +671,25 @@ export const useChatStore = defineStore('chat', () => {
 		) => graphService.streamConversation(request.sessionId!, request.query, onMessage, onError, onComplete);
 		const closeStream = await startStream(
 			async (response: GraphNodeResponse) => {
+				sessionState.threadId = response.threadId || sessionState.threadId;
+				if (sessionState.lastRequest && response.threadId) {
+					sessionState.lastRequest.threadId = response.threadId;
+				}
 				// ConversationPlan is routing metadata. It must not be rendered as a
 				// second assistant answer before the dispatched graph finishes.
-				if (response.nodeName === 'ConversationPlan') return;
+				if (response.nodeName === 'ConversationPlan') {
+					try {
+						const planEnvelope = JSON.parse(response.text) as {
+							status?: string;
+						};
+						backendPersistedClarification = planEnvelope.status === 'CLARIFICATION';
+					}
+					catch {
+						backendPersistedClarification = false;
+					}
+					persistSessionState(sessionId);
+					return;
+				}
 				if (response.retrying) {
 					if (currentSession.value?.id === sessionId) {
 						appendTransientAssistantMessage(
@@ -856,7 +873,15 @@ export const useChatStore = defineStore('chat', () => {
 				activeStreamSessionIds.delete(sessionId);
 				flushPendingSync();
 
-				if (isClarificationStream) {
+				if (backendPersistedClarification) {
+					// Conversation routing owns this message and its follow-up handling.
+					// Do not enter the legacy graph clarification/resume protocol.
+					resetClarificationState(sessionState);
+					sessionState.isStreaming = false;
+					sessionState.isReportStreaming = false;
+					clearPersistedSessionState(sessionId);
+					if (currentSession.value?.id === sessionId) isStreaming.value = false;
+				} else if (isClarificationStream) {
 					const question = streamedClarificationText.trim();
 					const count =
 						streamedClarificationCount ||
@@ -938,7 +963,13 @@ export const useChatStore = defineStore('chat', () => {
 				console.log(`会话[${sessionTitle}]处理完成`);
 			},
 		);
-		sessionState.closeStream = closeStream;
+		sessionState.closeStream = () => {
+			closeStream();
+			if (viewSyncTimer) clearTimeout(viewSyncTimer);
+			if (reportSyncTimer) clearTimeout(reportSyncTimer);
+			viewSyncTimer = null;
+			reportSyncTimer = null;
+		};
 		persistSessionState(sessionId);
 	}
 
@@ -946,14 +977,13 @@ export const useChatStore = defineStore('chat', () => {
 		if (!currentSession.value) return;
 		const sessionId = currentSession.value.id;
 		const sessionState = getSessionState(sessionId);
-		if (!sessionState.closeStream) return;
+		if (!sessionState.isStreaming && !isStreaming.value) return;
 
 		const threadId =
 			sessionState.threadId || sessionState.lastRequest?.threadId;
-		await graphService
-			.stopStream(threadId, sessionId)
-			.catch((e) => console.error(e));
-		sessionState.closeStream();
+		// Restored runtime snapshots have no transport handle. Clear the UI even
+		// then, and never let a slow cancellation/persistence request block Stop.
+		sessionState.closeStream?.();
 		activeStreamSessionIds.delete(sessionId);
 		sessionState.closeStream = null;
 		sessionState.isStreaming = false;
@@ -965,6 +995,22 @@ export const useChatStore = defineStore('chat', () => {
 		sessionState.feedbackContent = '';
 		resetClarificationState(sessionState);
 		clearPersistedSessionState(sessionId);
+		isStreaming.value = false;
+		nodeBlocks.value = [];
+		isReportStreaming.value = false;
+		streamingReportContent.value = '';
+		showHumanFeedback.value = false;
+		feedbackContent.value = '';
+		void graphService
+			.stopStream(threadId, sessionId)
+			.catch((e) => {
+				console.error('Backend cancellation failed:', e);
+				appendTransientAssistantMessage(
+					sessionId,
+					'warning',
+					'已停止接收回复，但未能确认后台任务已停止。',
+				);
+			});
 
 		// Save user-terminated warning message
 		const warningMsg: ChatMessage = {
@@ -973,17 +1019,10 @@ export const useChatStore = defineStore('chat', () => {
 			content: '用户已终止本次对话。',
 			messageType: 'warning',
 		};
-		await chatService
+		currentMessages.value.push(warningMsg);
+		void chatService
 			.saveMessage(sessionId, warningMsg)
 			.catch((e) => console.error(e));
-
-		if (currentSession.value?.id === sessionId) {
-			isStreaming.value = false;
-			nodeBlocks.value = [];
-			isReportStreaming.value = false;
-			streamingReportContent.value = '';
-			currentMessages.value = await chatService.getSessionMessages(sessionId);
-		}
 	}
 
 	async function submitFeedback(rejected: boolean, content: string) {

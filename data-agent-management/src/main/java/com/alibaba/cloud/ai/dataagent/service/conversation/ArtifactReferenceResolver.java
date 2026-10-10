@@ -32,8 +32,8 @@ import org.springframework.stereotype.Component;
 public class ArtifactReferenceResolver {
 
 	private static final Pattern CHART_NUMBER = Pattern.compile("(?:图表|图)\\s*(\\d+)");
-	private static final Pattern ORDINAL_CHART = Pattern.compile("第\\s*([一二三四五六七八九十0-9]+)\\s*张图");
-	private static final Pattern RELATIVE_CHART = Pattern.compile("上面(?:这)?张图|这张图|刚才(?:那)?张图|上一张图");
+	private static final Pattern ORDINAL_CHART = Pattern.compile("第\\s*([一二三四五六七八九十0-9]+)\\s*(?:张|个)?\\s*图");
+	private static final Pattern RELATIVE_CHART = Pattern.compile("上面(?:这)?[个张]?图|这[个张]图|刚才(?:那)?张图|上一张图");
 
 	public Resolution resolve(String userMessage, List<AnalysisArtifact> artifacts) {
 		List<AnalysisArtifact> charts = chartsInStableOrder(artifacts);
@@ -59,10 +59,13 @@ public class ArtifactReferenceResolver {
 			return Resolution.ambiguous(cards(charts, titleMatches));
 		}
 		if (RELATIVE_CHART.matcher(userMessage).find()) {
-			if (charts.size() == 1) {
-				return Resolution.resolved(charts.get(0), label(charts, charts.get(0)), "唯一图表");
+			AnalysisArtifact latest = charts.get(charts.size() - 1);
+			List<AnalysisArtifact> recent = charts.stream().filter(chart -> java.util.Objects.equals(
+					chartGroup(chart), chartGroup(latest))).toList();
+			if (recent.size() == 1) {
+				return Resolution.resolved(latest, label(charts, latest), "最近报表的唯一图表");
 			}
-			return Resolution.ambiguous(cards(charts, charts));
+			return Resolution.ambiguous(cards(charts, recent));
 		}
 		return Resolution.none();
 	}
@@ -70,6 +73,10 @@ public class ArtifactReferenceResolver {
 	public List<Card> cards(List<AnalysisArtifact> artifacts) {
 		List<AnalysisArtifact> charts = chartsInStableOrder(artifacts);
 		return cards(charts, charts);
+	}
+
+	static String chartGroup(AnalysisArtifact artifact) {
+		return "QUERY_RESULT".equals(artifact.getType()) ? artifact.getId() : artifact.getParentArtifactId();
 	}
 
 	private Resolution byNumber(List<AnalysisArtifact> charts, int number) {
@@ -81,15 +88,70 @@ public class ArtifactReferenceResolver {
 	}
 
 	private List<AnalysisArtifact> chartsInStableOrder(List<AnalysisArtifact> artifacts) {
+		Comparator<AnalysisArtifact> fallbackOrder = Comparator
+			.comparing(AnalysisArtifact::getCreateTime, Comparator.nullsLast(Comparator.naturalOrder()))
+			.thenComparing(AnalysisArtifact::getId, Comparator.nullsLast(Comparator.naturalOrder()));
 		return artifacts.stream()
-			.filter(artifact -> isChart(artifact) && !isSupersededQueryResult(artifact, artifacts))
-			.sorted(Comparator.comparing(AnalysisArtifact::getCreateTime, Comparator.nullsLast(Comparator.naturalOrder()))
-				.thenComparing(AnalysisArtifact::getId, Comparator.nullsLast(Comparator.naturalOrder())))
+			.filter(artifact -> isChart(artifact) && !isSupersededQueryResult(artifact, artifacts)
+					&& !isSupersededChart(artifact, artifacts))
+			.sorted(Comparator
+				.comparing((AnalysisArtifact artifact) -> groupCreateTime(artifact, artifacts),
+						Comparator.nullsLast(Comparator.naturalOrder()))
+				.thenComparingInt(this::chartOrder)
+				.thenComparing(fallbackOrder))
 			.toList();
+	}
+
+	private java.time.LocalDateTime groupCreateTime(AnalysisArtifact artifact, List<AnalysisArtifact> artifacts) {
+		String sourceQueryResultId = provenanceValue(artifact, "sourceQueryResultId");
+		if (sourceQueryResultId != null) {
+			return artifacts.stream().filter(candidate -> sourceQueryResultId.equals(candidate.getId()))
+				.map(AnalysisArtifact::getCreateTime).filter(java.util.Objects::nonNull).findFirst()
+				.orElse(artifact.getCreateTime());
+		}
+		if (artifact.getParentArtifactId() != null) {
+			return artifacts.stream().filter(candidate -> artifact.getParentArtifactId().equals(candidate.getId()))
+				.map(AnalysisArtifact::getCreateTime).filter(java.util.Objects::nonNull).findFirst()
+				.orElse(artifact.getCreateTime());
+		}
+		return artifact.getCreateTime();
+	}
+
+	private int chartOrder(AnalysisArtifact artifact) {
+		String value = provenanceValue(artifact, "chartOrder");
+		if (value == null) {
+			return Integer.MAX_VALUE;
+		}
+		try {
+			return Integer.parseInt(value);
+		}
+		catch (NumberFormatException ignored) {
+			return Integer.MAX_VALUE;
+		}
+	}
+
+	private String provenanceValue(AnalysisArtifact artifact, String field) {
+		if (artifact.getProvenance() == null || artifact.getProvenance().isBlank()) {
+			return null;
+		}
+		try {
+			JsonNode provenance = JsonUtil.getObjectMapper().readTree(artifact.getProvenance());
+			JsonNode value = provenance == null ? null : provenance.get(field);
+			return value == null || value.isNull() ? null : value.asText();
+		}
+		catch (Exception ignored) {
+			return null;
+		}
 	}
 
 	private boolean isSupersededQueryResult(AnalysisArtifact artifact, List<AnalysisArtifact> artifacts) {
 		return "QUERY_RESULT".equalsIgnoreCase(artifact.getType()) && artifacts.stream()
+				.anyMatch(candidate -> "CHART".equalsIgnoreCase(candidate.getType())
+						&& artifact.getId().equals(candidate.getParentArtifactId()));
+	}
+
+	private boolean isSupersededChart(AnalysisArtifact artifact, List<AnalysisArtifact> artifacts) {
+		return "CHART".equalsIgnoreCase(artifact.getType()) && artifacts.stream()
 				.anyMatch(candidate -> "CHART".equalsIgnoreCase(candidate.getType())
 						&& artifact.getId().equals(candidate.getParentArtifactId()));
 	}
@@ -131,7 +193,7 @@ public class ArtifactReferenceResolver {
 			JsonNode titleNode = spec == null ? null : spec.path("title");
 			String title = titleNode == null ? "" : titleNode.isObject() ? titleNode.path("text").asText("")
 					: titleNode.asText("");
-			return title.isBlank() ? artifact.getUserQuestion() : title;
+			return title.isBlank() ? java.util.Objects.toString(artifact.getUserQuestion(), "") : title;
 		}
 		catch (Exception ignored) {
 			return artifact.getUserQuestion() == null ? "" : artifact.getUserQuestion();

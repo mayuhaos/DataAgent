@@ -64,6 +64,20 @@ class ConversationControllerTest {
 	}
 
 	@Test
+	void planningRunsOutsideTheNonBlockingRequestThread() {
+		when(conversationService.submit(any(), any())).thenAnswer(invocation -> {
+			String value = reactor.core.publisher.Mono.just("ready")
+					.delayElement(Duration.ofMillis(5)).block();
+			assertEquals("ready", value);
+			return ConversationMessageResponse.builder().agentId("7").threadId("t1")
+					.status("CLARIFICATION").message("retry").build();
+		});
+		StepVerifier.create(Flux.defer(() -> controller.submit("s1", new ConversationMessageRequest(), response))
+				.subscribeOn(reactor.core.scheduler.Schedulers.parallel()))
+				.expectNextCount(2).verifyComplete();
+	}
+
+	@Test
 	void requeryPlanIsDispatchedToExistingGraphWithFreshThread() {
 		OperationPlan plan = new OperationPlan();
 		plan.setExecutionMode(OperationPlan.ExecutionMode.REQUERY);

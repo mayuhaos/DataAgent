@@ -30,6 +30,15 @@ import static org.junit.jupiter.api.Assertions.*;
 class PlanProcessUtilTest {
 
 	@Test
+	void firstStep_doesNotIncludeResultsFromPreviousExecution() {
+		OverAllState state = TestFixtures.createStateWith(Map.of(PLANNER_NODE_OUTPUT,
+				TestFixtures.createSingleSqlPlanJson(), PLAN_CURRENT_STEP, 1,
+				SQL_EXECUTE_NODE_OUTPUT, Map.of("step_1", "OLD_REPORT_ID")));
+		assertEquals(PlanProcessUtil.getCurrentExecutionStepInstruction(state),
+				PlanProcessUtil.getCurrentExecutionStepInstructionWithResults(state));
+	}
+
+	@Test
 	void getPlan_withValidJson_returnsParsedPlan() {
 		String planJson = TestFixtures.createSingleSqlPlanJson();
 		OverAllState state = TestFixtures.createStateWith(Map.of(PLANNER_NODE_OUTPUT, planJson, PLAN_CURRENT_STEP, 1));

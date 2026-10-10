@@ -69,6 +69,8 @@ public class OperationPlan {
 	@Data
 	public static class PresentationChanges {
 		private String chartType;
+		/** Explicit user confirmation to chart a non-complete set of indicators as a pie. */
+		private Boolean allowPartialPie;
 		private String x;
 		private List<String> y = new ArrayList<>();
 		private String title;
