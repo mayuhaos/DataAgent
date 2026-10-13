@@ -84,7 +84,26 @@ class ResultSetBuilderTest {
 
 		ResultSetBO result = ResultSetBuilder.buildFrom(rs, "public");
 
-		assertEquals("", result.getData().get(0).get("col"));
+		assertNull(result.getData().get(0).get("col"));
+	}
+
+	@Test
+	void detectsTruncationOnlyWhenAnAdditionalRowExists() throws SQLException {
+		for (int rowCount : new int[] {999, 1000, 1001}) {
+			ResultSetMetaData metadata = mock(ResultSetMetaData.class);
+			when(metadata.getColumnCount()).thenReturn(1);
+			when(metadata.getColumnLabel(1)).thenReturn("value");
+			ResultSet rows = mock(ResultSet.class);
+			when(rows.getMetaData()).thenReturn(metadata);
+			var seen = new java.util.concurrent.atomic.AtomicInteger();
+			when(rows.next()).thenAnswer(call -> seen.incrementAndGet() <= rowCount);
+			when(rows.getString("value")).thenReturn("1");
+			ResultSetBO result = ResultSetBuilder.buildFrom(rows, null);
+			assertEquals(Math.min(1000, rowCount), result.getData().size());
+			assertEquals(rowCount > 1000, result.isTruncated());
+			assertEquals(result.isTruncated(), result.clone().isTruncated());
+			assertEquals(1000, result.getRowLimit());
+		}
 	}
 
 	@Test

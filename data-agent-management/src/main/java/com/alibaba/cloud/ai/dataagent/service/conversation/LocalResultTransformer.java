@@ -34,6 +34,21 @@ public class LocalResultTransformer {
 
 	private final AnalysisResultStore analysisResultStore;
 
+	public String storeChartValues(AnalysisArtifact source, String presentationSpec) {
+		try {
+			JsonNode spec = JsonUtil.getObjectMapper().readTree(presentationSpec);
+			ArrayNode rows = JsonUtil.getObjectMapper().createArrayNode();
+			JsonNode data = spec.at("/series/0/data");
+			for (int index = 0; index < data.size(); index++) {
+				JsonNode value = data.get(index);
+				rows.addObject().put("category", value.isObject() ? value.path("name").asText() : spec.at("/xAxis/data").path(index).asText())
+						.set("value", value.isObject() ? value.path("value") : value);
+			}
+			return analysisResultStore.put(source.getSessionId(), rows.toString(), Duration.ofHours(1));
+		}
+		catch (Exception ex) { throw new IllegalStateException("unable to persist transformed chart values", ex); }
+	}
+
 	public String transform(AnalysisArtifact source, OperationPlan.DataChanges changes) {
 		if (source.getResultRef() == null) {
 			throw new IllegalStateException("result unavailable");

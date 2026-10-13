@@ -16,6 +16,7 @@
 package com.alibaba.cloud.ai.dataagent.workflow.node;
 
 import static com.alibaba.cloud.ai.dataagent.constant.Constant.PLAN_CURRENT_STEP;
+import static com.alibaba.cloud.ai.dataagent.constant.Constant.PLANNER_NODE_OUTPUT;
 import static com.alibaba.cloud.ai.dataagent.constant.Constant.SQL_EXECUTE_NODE_OUTPUT;
 import static com.alibaba.cloud.ai.dataagent.constant.Constant.SQL_GENERATE_COUNT;
 import static com.alibaba.cloud.ai.dataagent.constant.Constant.SQL_GENERATE_OUTPUT;
@@ -32,6 +33,7 @@ import com.alibaba.cloud.ai.dataagent.connector.accessor.Accessor;
 import com.alibaba.cloud.ai.dataagent.constant.Constant;
 import com.alibaba.cloud.ai.dataagent.dto.datasource.SqlRetryDto;
 import com.alibaba.cloud.ai.dataagent.dto.planner.ExecutionStep;
+import com.alibaba.cloud.ai.dataagent.dto.planner.Plan;
 import com.alibaba.cloud.ai.dataagent.enums.TextType;
 import com.alibaba.cloud.ai.dataagent.prompt.PromptHelper;
 import com.alibaba.cloud.ai.dataagent.properties.DataAgentProperties;
@@ -153,6 +155,7 @@ public class SqlExecuteNode implements NodeAction {
 			emitter.next(ChatResponseUtil.createResponse(sqlQuery));
 			emitter.next(ChatResponseUtil.createPureResponse(TextType.SQL.getEndSign()));
 			ResultBO resultBO = ResultBO.builder().build();
+			resultBO.setQueryStep(currentStep);
 
 			try {
 				// Execute SQL query and get results immediately
@@ -160,7 +163,8 @@ public class SqlExecuteNode implements NodeAction {
 				List<Map<String, String>> queryData = Optional.ofNullable(resultSetBO.getData()).orElseGet(List::of);
 				if (queryData.isEmpty()) {
 					emitter.next(ChatResponseUtil.createPureResponse(TextType.FINAL_ANSWER.getStartSign()));
-					emitter.next(ChatResponseUtil.createResponse(EMPTY_QUERY_MESSAGE));
+					emitter.next(ChatResponseUtil.createResponse(sqlQuery.contains("quality_snapshot_version")
+							? "当前数据库中该范围的完整缺陷明细记录数为 0；未查到记录，不能据此认定实际没有不良。" : EMPTY_QUERY_MESSAGE));
 					emitter.next(ChatResponseUtil.createPureResponse(TextType.FINAL_ANSWER.getEndSign()));
 					result.putAll(Map.of(SQL_REGENERATE_REASON, SqlRetryDto.empty(), SQL_RESULT_LIST_MEMORY,
 							queryData, SQL_QUERY_EMPTY, true, SQL_GENERATE_COUNT, 0));
@@ -191,17 +195,20 @@ public class SqlExecuteNode implements NodeAction {
 				log.info("SQL execution successful, result count: {}",
 						resultSetBO.getData() != null ? resultSetBO.getData().size() : 0);
 
-				// 回写最终执行的sql，报告节点需要使用
-				ExecutionStep.ToolParameters currentStepParams = PlanProcessUtil.getCurrentExecutionStep(state)
+				// Persist the actual successful SQL in the plan read by downstream report nodes.
+				Plan executedPlan = PlanProcessUtil.getPlan(state);
+				ExecutionStep.ToolParameters currentStepParams = PlanProcessUtil.getCurrentExecutionStep(executedPlan, currentStep)
 					.getToolParameters();
 				currentStepParams.setSqlQuery(sqlQuery);
+				String executedPlanJson = JsonUtil.getObjectMapper().writeValueAsString(executedPlan);
 
 				// Prepare the final result object
 				// Store List of SQL query results for use by code execution node
 				// Reset sql generate count retry times when sql execute success
 				result.putAll(Map.of(SQL_EXECUTE_NODE_OUTPUT, updatedResults, SQL_REGENERATE_REASON,
 						SqlRetryDto.empty(), SQL_RESULT_LIST_MEMORY, queryData, SQL_QUERY_EMPTY, false,
-						PLAN_CURRENT_STEP, currentStep + 1, SQL_GENERATE_COUNT, 0));
+						PLAN_CURRENT_STEP, currentStep + 1, SQL_GENERATE_COUNT, 0,
+						PLANNER_NODE_OUTPUT, executedPlanJson));
 			}
 			catch (Exception e) {
 				String errorMessage = e.getMessage();

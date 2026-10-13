@@ -581,7 +581,7 @@ public class GraphServiceImpl implements GraphService {
 				log.debug("StreamContext cleaned before subscription for threadId: {}", threadId);
 				return;
 			}
-			Disposable disposable = nodeOutputFlux.subscribe(output -> handleNodeOutput(graphRequest, output),
+			Disposable disposable = nodeOutputFlux.timeout(Duration.ofMinutes(3)).subscribe(output -> handleNodeOutput(graphRequest, output),
 					error -> handleStreamError(agentId, threadId, error),
 					() -> handleStreamComplete(agentId, threadId));
 			synchronized (context) {
@@ -721,22 +721,29 @@ public class GraphServiceImpl implements GraphService {
 		}
 		try {
 			String sql = null;
-			JsonNode result = null;
+			java.util.Map<String, java.util.Map.Entry<String, JsonNode>> snapshots = new java.util.LinkedHashMap<>();
 			StringBuilder report = new StringBuilder();
 			for (GraphNodeResponse response : context.getReplayResponsesAfter(0)) {
 				if (response.getTextType() == TextType.SQL && StringUtils.hasText(response.getText())) {
 					sql = response.getText();
 				}
 				else if (response.getTextType() == TextType.RESULT_SET && StringUtils.hasText(response.getText())) {
-					result = JsonUtil.getObjectMapper().readTree(response.getText());
+					JsonNode result = JsonUtil.getObjectMapper().readTree(response.getText());
+					String step = "step_" + result.path("queryStep").asText(String.valueOf(snapshots.size() + 1));
+					if (StringUtils.hasText(sql)) snapshots.put(step, java.util.Map.entry(sql, result));
 				}
 				else if (response.getTextType() == TextType.MARK_DOWN && StringUtils.hasText(response.getText())) {
 					report.append(response.getText());
 				}
 			}
-			if (!StringUtils.hasText(sql) || result == null) {
+			if (snapshots.isEmpty()) {
 				return;
 			}
+			java.util.Map<String, AnalysisArtifact> sources = new java.util.LinkedHashMap<>();
+			java.time.LocalDateTime expireTime = java.time.LocalDateTime.now().plusHours(1);
+			for (var snapshot : snapshots.entrySet()) {
+			JsonNode result = snapshot.getValue().getValue();
+			sql = snapshot.getValue().getKey();
 			JsonNode resultSet = result.path("resultSet");
 			JsonNode columns = resultSet.path("column");
 			JsonNode data = resultSet.path("data");
@@ -748,30 +755,50 @@ public class GraphServiceImpl implements GraphService {
 				sample.add(maskSampleRow(data.get(i)));
 			}
 			AnalysisArtifact parent = analysisArtifactService.findLatestSuccessful(sessionId, context.getTopicId());
-			java.time.LocalDateTime expireTime = java.time.LocalDateTime.now().plusHours(1);
 			String resultRef = analysisResultStore.put(sessionId, data.toString(), Duration.ofHours(1));
+			var inputSpec = JsonUtil.getObjectMapper().createObjectNode();
+			if (!data.isEmpty() && columns.toString().contains("quality_snapshot_version")) {
+				inputSpec.put("metric", "SUM(paint_defect_detail.defect_count)")
+						.put("factoryId", data.get(0).path("scope_factory_id").asInt())
+						.put("startDate", data.get(0).path("scope_start_date").asText())
+						.put("endDateExclusive", data.get(0).path("scope_end_date").asText())
+						.put("allCategories", data.get(0).path("scope_all_categories").asInt() == 1);
+			}
+			String dataHash = java.util.HexFormat.of().formatHex(java.security.MessageDigest.getInstance("SHA-256")
+					.digest(data.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8)));
 			AnalysisArtifact artifact = AnalysisArtifact.builder()
 				.sessionId(sessionId)
 				.topicId(context.getTopicId())
 				.parentArtifactId(parent == null ? null : parent.getId())
 				.type("QUERY_RESULT")
+				.inputSpec(inputSpec.toString())
 				.userQuestion(context.getUserQuestion())
 				.sqlQuery(sql)
 				.resultRef(resultRef)
 				.resultSchema(JsonUtil.getObjectMapper().writeValueAsString(columns))
 				.resultSample(JsonUtil.getObjectMapper().writeValueAsString(sample))
-				.resultSummary("{\"rowCount\":" + data.size() + ",\"sampleRowCount\":" + sample.size() + "}")
+				.resultSummary("{\"rowCount\":" + data.size() + ",\"sampleRowCount\":" + sample.size()
+						+ ",\"truncated\":" + resultSet.path("truncated").asBoolean() + ",\"rowLimit\":"
+						+ resultSet.path("rowLimit").asInt(1000) + ",\"dataHash\":\"" + dataHash + "\"}")
+				.provenance("{\"sourceStep\":\"" + snapshot.getKey() + "\",\"reportId\":\"" + context.getThreadId() + "\"}")
 				.presentationSpec(JsonUtil.getObjectMapper().writeValueAsString(result.path("displayStyle")))
 				.expireTime(expireTime)
-				.status("SUCCESS")
+				.status(resultSet.path("truncated").asBoolean() ? "TRUNCATED" : "SUCCESS")
 				.build();
 			analysisArtifactService.save(artifact);
-			persistReportCharts(artifact, report.toString(), expireTime);
+			sources.put(snapshot.getKey(), artifact);
+			}
+			if (sources.isEmpty()) return;
+			AnalysisArtifact artifact = sources.values().stream().reduce((first, last) -> last).orElseThrow();
+			String resultRef = artifact.getResultRef();
+			persistReportCharts(sources, report.toString(), expireTime);
 			if (!report.isEmpty()) {
 				AnalysisArtifact reportArtifact = AnalysisArtifact.builder().sessionId(sessionId).topicId(context.getTopicId())
 						.parentArtifactId(artifact.getId()).type("REPORT").inputSpec(artifact.getInputSpec())
 						.userQuestion(context.getUserQuestion()).resultRef(resultRef).resultSchema(artifact.getResultSchema())
 						.resultSummary(artifact.getResultSummary()).presentationSpec(artifact.getPresentationSpec())
+						.provenance(JsonUtil.getObjectMapper().writeValueAsString(java.util.Map.of("reportId", context.getThreadId(),
+								"sourceQueryResultIds", sources.values().stream().map(AnalysisArtifact::getId).toList())))
 						.contentRef(analysisResultStore.put(sessionId, report.toString(), Duration.ofHours(1)))
 						.expireTime(expireTime).status("SUCCESS").build();
 				analysisArtifactService.save(reportArtifact);
@@ -782,13 +809,20 @@ public class GraphServiceImpl implements GraphService {
 		}
 	}
 
-	private void persistReportCharts(AnalysisArtifact source, String report, java.time.LocalDateTime expireTime) {
+	private void persistReportCharts(java.util.Map<String, AnalysisArtifact> sources, String report, java.time.LocalDateTime expireTime) {
 		Matcher matcher = ECHARTS_BLOCK.matcher(report);
 		int chartOrder = 0;
 		while (matcher.find()) {
 			String presentationSpec = matcher.group(1).trim();
+			AnalysisArtifact source;
 			try {
-				JsonUtil.getObjectMapper().readTree(presentationSpec);
+				JsonNode parsed = JsonUtil.getObjectMapper().readTree(presentationSpec);
+				String step = parsed.path("dataAgent").path("sourceStep").asText();
+				source = step.isBlank() && sources.size() == 1 ? sources.values().iterator().next() : sources.get(step);
+				if (source == null) {
+					log.warn("Chart source is ambiguous; skipping unbound chart artifact");
+					continue;
+				}
 			}
 			catch (Exception ignored) {
 				continue;
@@ -817,6 +851,7 @@ public class GraphServiceImpl implements GraphService {
 			}
 			provenance.put("chartOrder", chartOrder);
 			provenance.put("sourceQueryResultId", source.getId());
+			provenance.put("logicalChartId", provenance.path("reportId").asText(source.getId()) + ":" + chartOrder);
 			return JsonUtil.getObjectMapper().writeValueAsString(provenance);
 		}
 		catch (Exception ex) {

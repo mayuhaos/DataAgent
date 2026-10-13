@@ -72,6 +72,7 @@ class SqlExecutorTest {
 		assertEquals(1, result.getData().size());
 		assertEquals("1", result.getData().get(0).get("id"));
 		assertEquals("Alice", result.getData().get(0).get("name"));
+		verify(statement).setMaxRows(SqlExecutor.RESULT_SET_LIMIT + 1);
 	}
 
 	@Test

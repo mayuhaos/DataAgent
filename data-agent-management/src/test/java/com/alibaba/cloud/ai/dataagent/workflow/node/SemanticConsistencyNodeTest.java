@@ -22,6 +22,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 
 import com.alibaba.cloud.ai.dataagent.common.TestFixtures;
@@ -84,6 +85,26 @@ class SemanticConsistencyNodeTest {
 		state.updateState(Map.of(EVIDENCE, "test evidence", TABLE_RELATION_OUTPUT, createSimpleSchema(),
 				DB_DIALECT_TYPE, "mysql", SQL_GENERATE_OUTPUT, sql, QUERY_ENHANCE_NODE_OUTPUT, dto, PLANNER_NODE_OUTPUT,
 				planJson, PLAN_CURRENT_STEP, 1));
+	}
+
+	@Test
+	void onlyExactControlledAggregateSkipsModelValidation() throws Exception {
+		SchemaDTO schema = createSimpleSchema();
+		var detail = new com.alibaba.cloud.ai.dataagent.dto.schema.TableDTO(); detail.setName("paint_defect_detail");
+		var dictionary = new com.alibaba.cloud.ai.dataagent.dto.schema.TableDTO(); dictionary.setName("paint_defect_dictionary");
+		schema.setTable(List.of(detail, dictionary));
+		String question = "一厂2026年6月喷涂完整缺陷数量";
+		var query = com.alibaba.cloud.ai.dataagent.dto.prompt.SqlGenerationDTO.builder().query(question).schemaDTO(schema).build();
+		String sql = com.alibaba.cloud.ai.dataagent.util.PaintDefectAnalysis.query(query).orElseThrow();
+		OverAllState state = createTestState(); setupBasicState(state, sql);
+		state.updateState(Map.of(TABLE_RELATION_OUTPUT, schema, QUERY_ENHANCE_NODE_OUTPUT, TestFixtures.createQueryEnhanceDTO(question),
+				PLANNER_NODE_OUTPUT, TestFixtures.planToJson(TestFixtures.createPlan("缺陷统计", TestFixtures.createSqlStep(1, "汇总完整缺陷数量")))));
+		semanticConsistencyNode.apply(state);
+		org.mockito.Mockito.verifyNoInteractions(nl2SqlService);
+		state.updateState(Map.of(SQL_GENERATE_OUTPUT, sql.replace("d.factory_id = 1", "d.factory_id = 2")));
+		when(nl2SqlService.performSemanticConsistency(any())).thenReturn(Flux.just(ChatResponseUtil.createPureResponse("{\"passed\":false,\"reason\":\"factory changed\"}")));
+		semanticConsistencyNode.apply(state);
+		verify(nl2SqlService).performSemanticConsistency(any());
 	}
 
 	@Test

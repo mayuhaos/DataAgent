@@ -77,6 +77,31 @@ class PythonExecuteNodeTest {
 	}
 
 	@Test
+	void apply_lostAggregateAlias_retriesAndFallsBackAtRetryLimit() throws Exception {
+		OverAllState state = createTestState();
+		setupBasicState(state);
+		state.registerKeyAndStrategy(SQL_GENERATE_OUTPUT, new ReplaceStrategy());
+		state.updateState(Map.of(SQL_GENERATE_OUTPUT, "SELECT SUM(check_total) AS production_count FROM stats",
+				SQL_RESULT_LIST_MEMORY, List.of(Map.of("production_count", "111192.0000")), PYTHON_TRIES_COUNT, 1));
+		when(codePoolExecutor.runTask(any())).thenReturn(CodePoolExecutorService.TaskResponse.success(
+				"{\"production_count\":111192,\"check_total\":null,\"first_pass_rate\":null}"));
+		@SuppressWarnings("unchecked")
+		var flux = (reactor.core.publisher.Flux<com.alibaba.cloud.ai.graph.GraphResponse<com.alibaba.cloud.ai.graph.streaming.StreamingOutput>>)
+				pythonExecuteNode.apply(state).get(PYTHON_EXECUTE_NODE_OUTPUT);
+		@SuppressWarnings("unchecked")
+		var retry = (Map<String, Object>) flux.last().block().resultValue().orElseThrow();
+		assertEquals(false, retry.get(PYTHON_IS_SUCCESS));
+		assertTrue(retry.get(PYTHON_EXECUTE_NODE_OUTPUT).toString().contains("Python字段匹配错误"));
+		state.updateState(Map.of(PYTHON_TRIES_COUNT, 5));
+		@SuppressWarnings("unchecked")
+		var fallbackFlux = (reactor.core.publisher.Flux<com.alibaba.cloud.ai.graph.GraphResponse<com.alibaba.cloud.ai.graph.streaming.StreamingOutput>>)
+				pythonExecuteNode.apply(state).get(PYTHON_EXECUTE_NODE_OUTPUT);
+		@SuppressWarnings("unchecked")
+		var fallback = (Map<String, Object>) fallbackFlux.last().block().resultValue().orElseThrow();
+		assertEquals(true, fallback.get(PYTHON_FALLBACK_MODE));
+	}
+
+	@Test
 	void apply_validCode_executesSuccessfully() throws Exception {
 		OverAllState state = createTestState();
 		setupBasicState(state);

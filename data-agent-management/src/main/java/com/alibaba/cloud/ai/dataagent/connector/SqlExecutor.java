@@ -46,7 +46,7 @@ public class SqlExecutor {
 	public static ResultSetBO executeSqlAndReturnObject(Connection connection, String schema, String sql)
 			throws SQLException {
 		try (Statement statement = connection.createStatement()) {
-			statement.setMaxRows(RESULT_SET_LIMIT);
+			statement.setMaxRows(RESULT_SET_LIMIT + 1);
 			statement.setQueryTimeout(STATEMENT_TIMEOUT);
 
 			DatabaseMetaData metaData = connection.getMetaData();

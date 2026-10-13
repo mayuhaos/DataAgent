@@ -27,6 +27,7 @@ import com.alibaba.cloud.ai.dataagent.util.ChatResponseUtil;
 import com.alibaba.cloud.ai.dataagent.util.FluxUtil;
 import com.alibaba.cloud.ai.dataagent.util.JsonUtil;
 import com.alibaba.cloud.ai.dataagent.util.StateUtil;
+import com.alibaba.cloud.ai.dataagent.util.PythonResultValidator;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.model.ChatResponse;
@@ -82,6 +83,15 @@ public class PythonExecuteNode implements NodeAction {
 
 			// Run Python code
 			CodePoolExecutorService.TaskResponse taskResponse = this.codePoolExecutor.runTask(taskRequest);
+			if (taskResponse.isSuccess()) {
+				try {
+					PythonResultValidator.validateAliasedSums(
+							StateUtil.getStringValue(state, SQL_GENERATE_OUTPUT, ""), sqlResults, taskResponse.stdOut());
+				}
+				catch (IllegalStateException exception) {
+					taskResponse = CodePoolExecutorService.TaskResponse.failure(taskResponse.stdOut(), exception.getMessage());
+				}
+			}
 			if (!taskResponse.isSuccess()) {
 				String errorMsg = "Python Execute Failed!\nStdOut: " + taskResponse.stdOut() + "\nStdErr: "
 						+ taskResponse.stdErr() + "\nExceptionMsg: " + taskResponse.exceptionMsg();

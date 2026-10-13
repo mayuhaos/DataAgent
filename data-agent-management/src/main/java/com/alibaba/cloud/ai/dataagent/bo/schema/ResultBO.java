@@ -30,4 +30,6 @@ public class ResultBO {
 
 	private DisplayStyleBO displayStyle;
 
+	private Integer queryStep;
+
 }

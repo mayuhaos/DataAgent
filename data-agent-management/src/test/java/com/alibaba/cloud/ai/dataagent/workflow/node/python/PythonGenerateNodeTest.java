@@ -122,6 +122,24 @@ class PythonGenerateNodeTest {
 	}
 
 	@Test
+	void apply_aggregateAlias_includesExecutedSqlAndActualInputColumns() throws Exception {
+		OverAllState state = createTestState();
+		setupBasicState(state);
+		state.registerKeyAndStrategy(SQL_GENERATE_OUTPUT, new ReplaceStrategy());
+		String sql = "SELECT SUM(check_total) AS production_count FROM paint_product_shift_stats";
+		state.updateState(Map.of(SQL_GENERATE_OUTPUT, sql, SQL_RESULT_LIST_MEMORY,
+				List.of(Map.of("production_count", "111192.0000", "first_pass_count", "60803.0000"))));
+		when(llmService.callWithState(anyString(), anyString(), org.mockito.ArgumentMatchers.any()))
+			.thenReturn(Flux.just(ChatResponseUtil.createPureResponse("print('ok')")));
+		pythonGenerateNode.apply(state);
+		var prompt = org.mockito.ArgumentCaptor.forClass(String.class);
+		org.mockito.Mockito.verify(llmService).callWithState(prompt.capture(), anyString(), org.mockito.ArgumentMatchers.any());
+		assertTrue(prompt.getValue().contains(sql));
+		assertTrue(prompt.getValue().contains("[\"first_pass_count\",\"production_count\"]"));
+		assertTrue(prompt.getValue().contains("不得用None、0、dict.get默认值"));
+	}
+
+	@Test
 	void apply_validRequest_generatesPythonCode() throws Exception {
 		OverAllState state = createTestState();
 		setupBasicState(state);

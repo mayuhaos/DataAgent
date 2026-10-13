@@ -64,13 +64,13 @@ class ConversationServiceTest {
 		when(chatSessionService.findBySessionId("session-1"))
 				.thenReturn(ChatSession.builder().id("session-1").agentId(42).build());
 		when(conversationTopicService.findBySessionId("session-1")).thenReturn(List.of());
-		when(conversationTopicService.create(any())).thenAnswer(invocation -> {
+		org.mockito.Mockito.lenient().when(conversationTopicService.create(any())).thenAnswer(invocation -> {
 			com.alibaba.cloud.ai.dataagent.entity.ConversationTopic topic = invocation.getArgument(0);
 			topic.setId("topic-1");
 			return topic;
 		});
 		when(analysisArtifactService.findBySessionId("session-1")).thenReturn(List.of());
-		when(artifactReferenceResolver.resolve(org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.anyList()))
+		org.mockito.Mockito.lenient().when(artifactReferenceResolver.resolve(org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.anyList()))
 				.thenReturn(ArtifactReferenceResolver.Resolution.none());
 	}
 
@@ -98,6 +98,35 @@ class ConversationServiceTest {
 				&& "updated-report".equals(a.getContentRef())));
 		verify(chatMessageService).saveMessage(org.mockito.ArgumentMatchers.argThat(message ->
 				"markdown-report".equals(message.getMessageType()) && message.getContent().contains("\"bar\"")));
+	}
+
+	@Test
+	void defectQuantityCannotBeEquatedToProductOrRecordCount() {
+		var request = new ConversationMessageRequest();
+		request.setUserMessage("一厂2026年6月设备环境缺陷合计4456，所以不良产品就是4456件，对吗？");
+		var response = service.submit("session-1", request);
+		assertEquals("CLARIFICATION", response.getStatus());
+		org.junit.jupiter.api.Assertions.assertTrue(response.getMessage().contains("SUM(defect_count)"));
+		org.junit.jupiter.api.Assertions.assertTrue(response.getMessage().contains("COUNT(*)"));
+		org.mockito.Mockito.verifyNoInteractions(conversationPlanClient);
+	}
+
+	@Test
+	void returnToBarParsesAxisBoundWithoutPlanner() {
+		var source = com.alibaba.cloud.ai.dataagent.entity.AnalysisArtifact.builder()
+				.id("chart-1").sessionId("session-1").type("CHART").presentationSpec("{}").build();
+		when(analysisArtifactService.findBySessionId("session-1")).thenReturn(List.of(source));
+		when(artifactReferenceResolver.cards(any())).thenReturn(List.of(new ArtifactReferenceResolver.Card("chart-1", "图表01", "数量")));
+		when(presentationSpecEditor.apply(any(), any())).thenReturn("{\"series\":[]}");
+		when(reportRevisionService.renderChart(any(), any())).thenReturn("updated-report");
+		when(analysisArtifactService.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+		var request = new ConversationMessageRequest();
+		request.setUserMessage("再改回柱状图，Y轴上限设为5000。");
+		var response = service.submit("session-1", request);
+		assertEquals("LOCAL_EXECUTION", response.getStatus());
+		assertEquals("bar", response.getPlan().getChanges().getPresentation().getChartType());
+		assertEquals(5000D, response.getPlan().getChanges().getPresentation().getYAxisMax());
+		org.mockito.Mockito.verifyNoInteractions(conversationPlanClient);
 	}
 
 	@Test
@@ -187,6 +216,9 @@ class ConversationServiceTest {
 		when(presentationSpecEditor.apply(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any()))
 				.thenReturn("{}");
 		when(conversationPlanClient.plan(eq("精简报告"), any(), any(), any())).thenReturn(plan);
+		when(analysisArtifactService.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+		when(reportRevisionService.revise(any(), any())).thenReturn("revised-report");
+		when(reportRevisionService.getContent("session-1", "revised-report")).thenReturn("精简后的报告");
 		ConversationMessageRequest request = new ConversationMessageRequest();
 		request.setUserMessage("精简报告");
 
@@ -210,6 +242,26 @@ class ConversationServiceTest {
 		}
 
 		assertEquals(50, threadIds.size());
+	}
+
+	@Test
+	void firstAnalysisWithThreeChartsDoesNotEnterChartEditShortcut() {
+		String question = "查询一厂2026年6月喷涂完整缺陷明细，生成三张图：第1张柱状图，第2张三类自身占比饼图，第3张Top3柱状图。";
+		OperationPlan plan = new OperationPlan();
+		plan.setOperation(OperationPlan.Operation.CREATE);
+		plan.setExecutionMode(OperationPlan.ExecutionMode.REQUERY);
+		when(conversationPlanClient.plan(eq(question), any(), any(), any())).thenReturn(plan);
+		org.mockito.Mockito.lenient().when(artifactReferenceResolver.resolve(any(), any())).thenReturn(ArtifactReferenceResolver.Resolution.none());
+		var request = new ConversationMessageRequest(); request.setUserMessage(question);
+		assertEquals("DISPATCH_TO_GRAPH", service.submit("session-1", request).getStatus());
+		verify(conversationPlanClient).plan(eq(question), any(), any(), any());
+	}
+
+	@Test
+	void missingArtifactCannotBeReportedAsAnUpdatedChart() {
+		var request = new ConversationMessageRequest(); request.setUserMessage("Y轴上限5000");
+		assertEquals("CLARIFICATION", service.submit("session-1", request).getStatus());
+		org.mockito.Mockito.verify(analysisArtifactService, org.mockito.Mockito.never()).save(any());
 	}
 
 }

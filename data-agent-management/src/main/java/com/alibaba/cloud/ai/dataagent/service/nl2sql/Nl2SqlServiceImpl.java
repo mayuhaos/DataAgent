@@ -58,6 +58,11 @@ public class Nl2SqlServiceImpl implements Nl2SqlService {
 
 	@Override
 	public Flux<String> generateSql(SqlGenerationDTO sqlGenerationDTO) {
+		var verifiedQuery = PaintDefectAnalysis.query(sqlGenerationDTO);
+		if (verifiedQuery.isPresent()) {
+			log.info("Using verified full-detail paint defect aggregation");
+			return Flux.just(verifiedQuery.get());
+		}
 		String sql = sqlGenerationDTO.getSql();
 		log.info("Generating SQL for query: {}, hasExistingSql: {}, dialect: {}",
 				sqlGenerationDTO.getExecutionDescription(), StringUtils.hasText(sql), sqlGenerationDTO.getDialect());

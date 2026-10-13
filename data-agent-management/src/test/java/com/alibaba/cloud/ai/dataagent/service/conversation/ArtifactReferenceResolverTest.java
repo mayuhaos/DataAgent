@@ -56,6 +56,28 @@ class ArtifactReferenceResolverTest {
 	}
 
 	@Test
+	void chartOrderIsIndependentOfSourceQueryCreationOrder() {
+		var early = AnalysisArtifact.builder().id("query-1").type("QUERY_RESULT")
+				.provenance("{\"reportId\":\"report\"}").createTime(LocalDateTime.of(2026, 10, 13, 10, 0)).build();
+		var later = AnalysisArtifact.builder().id("query-2").type("QUERY_RESULT")
+				.provenance("{\"reportId\":\"report\"}").createTime(LocalDateTime.of(2026, 10, 13, 10, 1)).build();
+		var first = AnalysisArtifact.builder().id("chart-1").type("CHART").parentArtifactId(later.getId())
+				.provenance("{\"reportId\":\"report\",\"chartOrder\":1,\"sourceQueryResultId\":\"query-2\"}")
+				.createTime(LocalDateTime.of(2026, 10, 13, 10, 2)).build();
+		var second = AnalysisArtifact.builder().id("chart-2").type("CHART").parentArtifactId(early.getId())
+				.provenance("{\"reportId\":\"report\",\"chartOrder\":2,\"sourceQueryResultId\":\"query-1\"}")
+				.createTime(LocalDateTime.of(2026, 10, 13, 10, 2)).build();
+		assertEquals(first.getId(), resolver.resolve("只把第1张改成饼图", List.of(early, later, first, second)).artifact().getId());
+		assertEquals(second.getId(), resolver.resolve("只把第2张改成饼图", List.of(early, later, first, second)).artifact().getId());
+	}
+
+	@Test
+	void ordinalDoesNotRequireTheWordChartAfterMeasureWord() {
+		assertEquals("chart-1", resolver.resolve("只把第1张改成饼图", charts()).artifact().getId());
+		assertEquals("chart-2", resolver.resolve("只把第2张Y轴上限改成4000", charts()).artifact().getId());
+	}
+
+	@Test
 	void asksForClarificationWhenRelativeReferenceHasMultipleCharts() {
 		ArtifactReferenceResolver.Resolution result = resolver.resolve("把上面这张图的上限改为 150", charts());
 

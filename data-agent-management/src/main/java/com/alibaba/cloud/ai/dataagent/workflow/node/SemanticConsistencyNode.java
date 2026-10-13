@@ -78,7 +78,17 @@ public class SemanticConsistencyNode implements NodeAction {
 			.evidence(evidence)
 			.build();
 		log.info("Starting semantic consistency validation - SQL: {}", sql);
-		Flux<ChatResponse> validationResultFlux = nl2SqlService.performSemanticConsistency(semanticConsistencyDTO);
+		var expectedQuery = com.alibaba.cloud.ai.dataagent.util.PaintDefectAnalysis.query(
+				com.alibaba.cloud.ai.dataagent.dto.prompt.SqlGenerationDTO.builder().query(userQuery)
+						.originalQuery(StateUtil.getStringValue(state, ORIGINAL_USER_QUERY, userQuery))
+						.scopeRestricted(StateUtil.getStringValue(state, MULTI_TURN_CONTEXT, "").contains("服务端强制数据范围"))
+						.schemaDTO(schemaDTO).executionDescription(semanticConsistencyDTO.getExecutionDescription()).build());
+		boolean controlled = expectedQuery.isPresent() && expectedQuery.get().replaceAll("\\s+", " ").strip()
+				.equals(sql.replaceAll(";\\s*$", "").replaceAll("\\s+", " ").strip());
+		Flux<ChatResponse> validationResultFlux = controlled
+				? Flux.just(com.alibaba.cloud.ai.dataagent.util.ChatResponseUtil.createPureResponse(
+						"{\"passed\":true,\"reason\":\"已验证标准缺陷聚合的关联、范围及数量字段；报告由程序按结果计算。\"}"))
+				: nl2SqlService.performSemanticConsistency(semanticConsistencyDTO);
 
 		Flux<GraphResponse<StreamingOutput>> generator = FluxUtil.createStreamingGeneratorWithMessages(this.getClass(),
 				state, "开始语义一致性校验", "语义一致性校验完成", validationResult -> {

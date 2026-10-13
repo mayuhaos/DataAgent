@@ -47,7 +47,7 @@ public class PlanValidator {
 		}
 		if ((plan.getExecutionMode() == OperationPlan.ExecutionMode.REUSE
 				|| plan.getExecutionMode() == OperationPlan.ExecutionMode.TRANSFORM_LOCAL)
-				&& hasDataChange(plan)) {
+				&& hasDataChange(plan) && !isVerifiedShareTransform(plan, artifacts)) {
 			plan.setExecutionMode(OperationPlan.ExecutionMode.REQUERY);
 			plan.setReason("指标、维度、筛选、时间或粒度变化，不能复用旧结果。");
 		}
@@ -79,7 +79,29 @@ public class PlanValidator {
 			data.setDimensions(java.util.List.of());
 		}
 		return !data.getMetrics().isEmpty() || !data.getDimensions().isEmpty() || data.getFilters() != null
-				|| data.getTimeRange() != null || data.getGrain() != null || data.getSort() != null || data.getLimit() != null;
+				|| data.getTimeRange() != null || data.getGrain() != null || data.getSort() != null || data.getLimit() != null
+				|| data.getDenominatorScope() != null;
+	}
+
+	private boolean isVerifiedShareTransform(OperationPlan plan, Collection<AnalysisArtifact> artifacts) {
+		var data = plan.getChanges().getData();
+		if (data.getDenominatorScope() == null || !data.getMetrics().isEmpty() || !data.getDimensions().isEmpty()
+				|| data.getFilters() != null || data.getTimeRange() != null || data.getGrain() != null
+				|| data.getSort() != null || data.getLimit() != null) return false;
+		if (!Set.of("ALL", "SELECTED", "TOP").contains(data.getDenominatorScope())) return false;
+		if (plan.getTarget().getArtifactIds().size() != 1) return false;
+		for (AnalysisArtifact artifact : artifacts) {
+			if (!plan.getTarget().getArtifactIds().contains(artifact.getId())) continue;
+			try {
+				var meta = JsonUtil.getObjectMapper().readTree(artifact.getPresentationSpec()).path("dataAgent");
+				if (!meta.path("verified").asBoolean() || !meta.path("baseItems").isArray()) return false;
+				if ("ALL".equals(data.getDenominatorScope()) && !meta.hasNonNull("allTotal")) return false;
+				plan.setExecutionMode(OperationPlan.ExecutionMode.TRANSFORM_LOCAL);
+				return true;
+			}
+			catch (Exception ignored) { return false; }
+		}
+		return false;
 	}
 
 	private boolean requiresCompleteResult(OperationPlan plan) {

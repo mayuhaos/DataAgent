@@ -32,7 +32,7 @@ import org.springframework.stereotype.Component;
 public class ArtifactReferenceResolver {
 
 	private static final Pattern CHART_NUMBER = Pattern.compile("(?:图表|图)\\s*(\\d+)");
-	private static final Pattern ORDINAL_CHART = Pattern.compile("第\\s*([一二三四五六七八九十0-9]+)\\s*(?:张|个)?\\s*图");
+	private static final Pattern ORDINAL_CHART = Pattern.compile("第\\s*([一二三四五六七八九十0-9]+)\\s*(?:(?:张|个)\\s*图?|图)");
 	private static final Pattern RELATIVE_CHART = Pattern.compile("上面(?:这)?[个张]?图|这[个张]图|刚才(?:那)?张图|上一张图");
 
 	public Resolution resolve(String userMessage, List<AnalysisArtifact> artifacts) {
@@ -40,6 +40,10 @@ public class ArtifactReferenceResolver {
 		if (charts.isEmpty()) {
 			return Resolution.none();
 		}
+		String currentReport = provenanceValue(charts.get(charts.size() - 1), "reportId");
+		if (currentReport != null) charts = charts.stream()
+				.filter(chart -> currentReport.equals(provenanceValue(chart, "reportId"))).toList();
+		List<AnalysisArtifact> scopedCharts = charts;
 		Matcher number = CHART_NUMBER.matcher(userMessage);
 		if (number.find()) {
 			return byNumber(charts, Integer.parseInt(number.group(1)));
@@ -56,7 +60,7 @@ public class ArtifactReferenceResolver {
 			return Resolution.resolved(titleMatches.get(0), label(charts, titleMatches.get(0)), "图表名称");
 		}
 		if (titleMatches.size() > 1) {
-			return Resolution.ambiguous(cards(charts, titleMatches));
+			return Resolution.ambiguous(cards(scopedCharts, titleMatches));
 		}
 		if (RELATIVE_CHART.matcher(userMessage).find()) {
 			AnalysisArtifact latest = charts.get(charts.size() - 1);
@@ -76,6 +80,8 @@ public class ArtifactReferenceResolver {
 	}
 
 	static String chartGroup(AnalysisArtifact artifact) {
+		String reportId = provenanceValue(artifact, "reportId");
+		if (reportId != null) return reportId;
 		return "QUERY_RESULT".equals(artifact.getType()) ? artifact.getId() : artifact.getParentArtifactId();
 	}
 
@@ -103,6 +109,12 @@ public class ArtifactReferenceResolver {
 	}
 
 	private java.time.LocalDateTime groupCreateTime(AnalysisArtifact artifact, List<AnalysisArtifact> artifacts) {
+		String reportId = provenanceValue(artifact, "reportId");
+		if (reportId != null) {
+			return artifacts.stream().filter(candidate -> reportId.equals(provenanceValue(candidate, "reportId")))
+					.map(AnalysisArtifact::getCreateTime).filter(java.util.Objects::nonNull)
+					.min(java.util.Comparator.naturalOrder()).orElse(artifact.getCreateTime());
+		}
 		String sourceQueryResultId = provenanceValue(artifact, "sourceQueryResultId");
 		if (sourceQueryResultId != null) {
 			return artifacts.stream().filter(candidate -> sourceQueryResultId.equals(candidate.getId()))
@@ -130,7 +142,7 @@ public class ArtifactReferenceResolver {
 		}
 	}
 
-	private String provenanceValue(AnalysisArtifact artifact, String field) {
+	private static String provenanceValue(AnalysisArtifact artifact, String field) {
 		if (artifact.getProvenance() == null || artifact.getProvenance().isBlank()) {
 			return null;
 		}

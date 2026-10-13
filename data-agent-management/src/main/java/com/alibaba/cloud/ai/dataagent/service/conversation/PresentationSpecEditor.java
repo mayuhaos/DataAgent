@@ -35,6 +35,11 @@ public class PresentationSpecEditor {
 			putIfPresent(spec, "type", changes.getChartType());
 			putIfPresent(spec, "x", changes.getX());
 			if (changes.getTitle() != null && spec.path("series").isArray()) {
+				if (changes.getTitle().matches(".*(?:占比|比例|百分比).*" )
+						&& !spec.path("dataAgent").path("percentage").asBoolean()
+						&& !"pie".equals(spec.at("/series/0/type").asText())) {
+					throw new IllegalArgumentException("a percentage title requires a verified metric transformation");
+				}
 				spec.with("title").put("text", changes.getTitle());
 			}
 			else putIfPresent(spec, "title", changes.getTitle());
@@ -65,6 +70,10 @@ public class PresentationSpecEditor {
 		if (series.size() != 1) throw new IllegalArgumentException("conversion requires one series");
 		JsonNode oldSeries = series.get(0);
 		JsonNode data = oldSeries.path("data");
+		boolean verified = spec.path("dataAgent").path("verified").asBoolean()
+				&& spec.path("dataAgent").path("baseItems").isArray();
+		boolean percentageMode = "PERCENTAGE".equals(spec.path("dataAgent").path("valueMode").asText());
+		if (verified && spec.path("dataAgent").path("baseItems").isArray()) data = spec.path("dataAgent").path("baseItems");
 		if (!data.isArray() || data.isEmpty()) throw new IllegalArgumentException("chart data unavailable");
 		var names = JsonUtil.getObjectMapper().createArrayNode();
 		var values = JsonUtil.getObjectMapper().createArrayNode();
@@ -95,14 +104,16 @@ public class PresentationSpecEditor {
 		}
 		if ("pie".equals(type)) {
 			java.util.List<String> overlapNames = potentialOverlapNames(categoryNames);
-			if (total != null && !allowPartialPie && !overlapNames.isEmpty()) {
+			if (!overlapNames.isEmpty()) {
 				throw new PieConversionException(
 						"当前分类可能存在包含关系：" + String.join("、", overlapNames)
 								+ "。程序不能仅根据字段名称判断是否重复计算，请确认分类互斥后再生成饼图，或选择按现有指标自身占比展示。",
 					null, parts, null);
 			}
 			if (total != null && !allowPartialPie && total.compareTo(parts) != 0) {
-				java.math.BigDecimal difference = total.subtract(parts).abs();
+				java.math.BigDecimal difference = total.subtract(parts);
+				if (difference.signum() < 0) throw new PieConversionException(
+						"分项合计超过总数 " + format(difference.abs()) + "，可能存在重复计算，不能生成完整构成饼图。", total, parts, difference);
 				throw new PieConversionException(
 						"当前数据包含检查总数和部分结果指标，明细合计为 " + format(parts)
 								+ "，与检查总数 " + format(total) + " 不一致，差额为 " + format(difference)
@@ -110,7 +121,14 @@ public class PresentationSpecEditor {
 								+ format(difference) + " 的分类。",
 						total, parts, difference);
 			}
-			if (total == null && !allowPartialPie && !isKnownCompletePartition(categoryNames)) {
+			if (parts.signum() == 0) throw new PieConversionException("分类合计为零，无法计算饼图比例。", total, parts, null);
+			if (total != null && !allowPartialPie && !isKnownCompletePartition(categoryNames)
+					&& !spec.path("dataAgent").path("mutuallyExclusive").asBoolean()) {
+				throw new PieConversionException("分项合计等于总数，但尚未确认分类互斥，请确认业务分类关系。", total, parts, null);
+			}
+			if (total == null && !allowPartialPie && !isKnownCompletePartition(categoryNames)
+					&& !(spec.path("dataAgent").path("verified").asBoolean()
+						&& spec.path("dataAgent").path("mutuallyExclusive").asBoolean())) {
 				throw new PieConversionException(
 						"当前图表没有可证明完整且互斥的分类，无法直接生成构成饼图。请确认分类互斥且完整，或明确要求按现有指标自身占比展示。",
 						null, parts, null);
@@ -138,6 +156,63 @@ public class PresentationSpecEditor {
 			spec.with("tooltip").put("trigger", "axis");
 			spec.with("legend").put("show", false);
 		}
+		if (verified && percentageMode) {
+			String scope = allowPartialPie ? "SELECTED" : spec.path("dataAgent").path("denominatorScope").asText("SELECTED");
+			try {
+				ObjectNode transformed = parse(transformShares(spec.toString(), scope));
+				spec.removeAll();
+				spec.setAll(transformed);
+			}
+			catch (Exception ex) { throw new IllegalArgumentException("cannot preserve chart denominator", ex); }
+		}
+		else if (verified) {
+			spec.with("dataAgent").put("valueMode", "COUNT").put("percentage", false);
+			if (!"pie".equals(type)) spec.with("yAxis").put("name", "缺陷数量");
+		}
+	}
+
+	public String transformShares(String sourceSpec, String scope) {
+		try {
+			ObjectNode spec = parse(sourceSpec);
+			var meta = spec.path("dataAgent");
+			if (!meta.path("verified").asBoolean() || !meta.path("mutuallyExclusive").asBoolean()) {
+				throw new IllegalArgumentException("缺少经过验证的指标来源，不能直接计算比例。");
+			}
+			var items = JsonUtil.getObjectMapper().createArrayNode();
+			java.math.BigDecimal selectedTotal = java.math.BigDecimal.ZERO;
+			for (JsonNode item : meta.path("baseItems")) {
+				if ("other".equals(item.path("id").asText())) continue;
+				items.add(item.deepCopy());
+				selectedTotal = selectedTotal.add(item.path("value").decimalValue());
+			}
+			java.math.BigDecimal denominator = "ALL".equals(scope) ? meta.path("allTotal").decimalValue() : selectedTotal;
+			if (denominator.signum() <= 0 || denominator.compareTo(selectedTotal) < 0) throw new IllegalArgumentException("比例分母无效。");
+			boolean pie = "pie".equals(spec.at("/series/0/type").asText());
+			if (pie && "ALL".equals(scope) && denominator.compareTo(selectedTotal) > 0) {
+				items.addObject().put("id", "other").put("name", "其他缺陷").put("value", denominator.subtract(selectedTotal));
+			}
+			var names = JsonUtil.getObjectMapper().createArrayNode();
+			var data = JsonUtil.getObjectMapper().createArrayNode();
+			for (JsonNode item : items) {
+				names.add(item.path("name"));
+				if (pie) data.addObject().setAll((ObjectNode) item);
+				else data.add(item.path("value").decimalValue().multiply(java.math.BigDecimal.valueOf(100))
+						.divide(denominator, 2, java.math.RoundingMode.HALF_UP));
+			}
+			ObjectNode series = (ObjectNode) spec.path("series").get(0);
+			series.set("data", data);
+			series.with("label").put("formatter", pie ? "{b}: {c} ({d}%)" : "{c}%");
+			spec.with("legend").set("data", names);
+			if (!pie) {
+				spec.with("xAxis").set("data", names);
+				spec.with("yAxis").put("name", "比例 (%)");
+			}
+			spec.with("title").put("text", "ALL".equals(scope) ? "占全部缺陷比例" : "所选缺陷自身占比");
+			ObjectNode updated = (ObjectNode) meta;
+			updated.put("denominator", denominator).put("denominatorScope", scope).put("percentage", !pie).put("valueMode", "PERCENTAGE");
+			return spec.toString();
+		}
+		catch (Exception ex) { throw new IllegalArgumentException("比例转换失败：" + ex.getMessage(), ex); }
 	}
 
 	private java.math.BigDecimal decimalValue(JsonNode value) {

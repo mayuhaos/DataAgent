@@ -38,11 +38,18 @@ public final class ResultSetBO implements Cloneable {
 
 	private String errorMsg;
 
+	private boolean truncated;
+
+	private Integer rowLimit;
+
 	@Override
 	public ResultSetBO clone() {
 		return ResultSetBO.builder()
 			.column(new ArrayList<>(this.column))
 			.data(this.data.stream().map(HashMap::new).collect(Collectors.toList()))
+			.errorMsg(this.errorMsg)
+			.truncated(this.truncated)
+			.rowLimit(this.rowLimit)
 			.build();
 	}
 

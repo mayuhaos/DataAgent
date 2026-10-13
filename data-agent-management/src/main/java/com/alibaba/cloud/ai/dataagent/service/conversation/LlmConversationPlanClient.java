@@ -54,10 +54,13 @@ public class LlmConversationPlanClient implements ConversationPlanClient {
 				+ "A request to change an axis, title, legend, colour or chart type is presentation-only: use REUSE and do not set data changes. "
 				+ "For a pie chart, set allowPartialPie=true only when the user explicitly asks for the listed indicators' own share; otherwise preserve the data and do not invent missing categories. "
 				+ "A request to filter records, change metrics, dimensions, aggregation, time range or grain requires REQUERY. "
+				+ "A change from counts to percentages or a change in the percentage denominator is a DATA change: set changes.data.denominatorScope to ALL or SELECTED; never just rename the chart. "
+				+ "Creating one or more new charts in a fresh analysis is CREATE/REQUERY, not an edit of an existing artifact. "
 				+ "yAxisMin/yAxisMax change displayed bounds only; never use them as filters.\n"
 					+ "userMessage=" + userMessage + "\ncontext=" + context
 					+ "\n" + new org.springframework.ai.converter.BeanOutputConverter<>(OperationPlan.class).getFormat();
-			String json = llmService.blockToString(llmService.callUser(prompt, OperationPlan.class));
+			String json = llmService.blockToString(llmService.callUser(prompt, OperationPlan.class)
+					.timeout(java.time.Duration.ofSeconds(45)));
 			return JsonUtil.getObjectMapper().readValue(json, OperationPlan.class);
 		}
 		catch (Exception ex) {

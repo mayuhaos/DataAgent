@@ -42,10 +42,14 @@ public class ResultSetBuilder {
 		List<Map<String, String>> resultSetData = Lists.newArrayList();
 		int count = 0;
 
-		while (rs.next() && count < SqlExecutor.RESULT_SET_LIMIT) {
+		while (rs.next()) {
+			if (count == SqlExecutor.RESULT_SET_LIMIT) {
+				resultSetBO.setTruncated(true);
+				break;
+			}
 			Map<String, String> kv = new HashMap<>();
 			for (String h : rowHead) {
-				kv.put(h, rs.getString(h) == null ? "" : rs.getString(h));
+				kv.put(h, rs.getString(h));
 			}
 			resultSetData.add(kv);
 			count++;
@@ -57,6 +61,7 @@ public class ResultSetBuilder {
 
 		resultSetBO.setColumn(cleanedHead);
 		resultSetBO.setData(cleanedData);
+		resultSetBO.setRowLimit(SqlExecutor.RESULT_SET_LIMIT);
 
 		return resultSetBO;
 	}

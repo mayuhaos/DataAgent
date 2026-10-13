@@ -41,7 +41,7 @@ class PresentationSpecEditorTest {
 		OperationPlan.PresentationChanges changes = new OperationPlan.PresentationChanges();
 		changes.setChartType("pie");
 		String result = new PresentationSpecEditor().apply(
-				"{\"xAxis\":{\"data\":[\"检查数\",\"合格数\",\"返修数\",\"不合格数\"]},\"series\":[{\"type\":\"bar\",\"data\":[7688,6283,1389,16]}]}", changes);
+				"{\"dataAgent\":{\"verified\":true,\"mutuallyExclusive\":true},\"xAxis\":{\"data\":[\"检查数\",\"合格数\",\"返修数\",\"不合格数\"]},\"series\":[{\"type\":\"bar\",\"data\":[7688,6283,1389,16]}]}", changes);
 		var spec = JsonUtil.getObjectMapper().readTree(result);
 		assertEquals(3, spec.at("/series/0/data").size());
 		assertEquals(6283, spec.at("/series/0/data/0/value").asInt());
@@ -115,5 +115,88 @@ class PresentationSpecEditorTest {
 
 		assertEquals(150D, JsonUtil.getObjectMapper().readTree(result).path("yAxis").path("max").asDouble());
 		assertEquals("line", JsonUtil.getObjectMapper().readTree(result).path("type").asText());
+	}
+
+	@Test
+	void equalTotalDoesNotProveMutuallyExclusiveCategories() {
+		var changes = new OperationPlan.PresentationChanges(); changes.setChartType("pie");
+		assertEquals("分项合计等于总数，但尚未确认分类互斥，请确认业务分类关系。",
+				org.junit.jupiter.api.Assertions.assertThrows(PresentationSpecEditor.PieConversionException.class,
+						() -> new PresentationSpecEditor().apply("{\"xAxis\":{\"data\":[\"检查总数\",\"指标A\",\"指标B\"]},\"series\":[{\"type\":\"bar\",\"data\":[16,15,1]}]}", changes)).getMessage());
+	}
+
+	@Test
+	void shareChangesRecalculateValuesAndDenominatorsWithoutChangingBaseData() throws Exception {
+		String source = """
+		{"xAxis":{"data":["杂质","前划","水滴"]},"yAxis":{"type":"value"},"series":[{"type":"bar","data":[3397,671,623]}],
+		"dataAgent":{"verified":true,"mutuallyExclusive":true,"allTotal":6622,"baseItems":[
+		{"id":"1","name":"杂质","value":3397},{"id":"2","name":"前划","value":671},{"id":"3","name":"水滴","value":623}]}}
+		""";
+		var editor = new PresentationSpecEditor();
+		var all = com.alibaba.cloud.ai.dataagent.util.JsonUtil.getObjectMapper().readTree(editor.transformShares(source, "ALL"));
+		assertEquals(51.30, all.at("/series/0/data/0").asDouble());
+		assertEquals(6622, all.at("/dataAgent/denominator").asInt());
+		var selected = com.alibaba.cloud.ai.dataagent.util.JsonUtil.getObjectMapper().readTree(editor.transformShares(all.toString(), "SELECTED"));
+		assertEquals(72.42, selected.at("/series/0/data/0").asDouble());
+		assertEquals(4691, selected.at("/dataAgent/denominator").asInt());
+		assertEquals(3397, selected.at("/dataAgent/baseItems/0/value").asInt());
+	}
+
+	@Test
+	void countChartRoundTripPreservesCountsAndMode() throws Exception {
+		String source = """
+		{"title":{"text":"缺陷数量"},"xAxis":{"data":["塑件缺陷","喷房缺陷","设备环境"]},
+		"series":[{"type":"bar","data":[1375,542,4456]}],"dataAgent":{"verified":true,
+		"mutuallyExclusive":true,"valueMode":"COUNT","denominatorScope":"SELECTED","denominator":6373,
+		"baseItems":[{"id":"1","name":"塑件缺陷","value":1375},{"id":"3","name":"喷房缺陷","value":542},
+		{"id":"4","name":"设备环境","value":4456}]}}
+		""";
+		var editor = new PresentationSpecEditor();
+		var changes = new OperationPlan.PresentationChanges(); changes.setChartType("pie");
+		var pie = JsonUtil.getObjectMapper().readTree(editor.apply(source, changes));
+		assertEquals(1375, pie.at("/series/0/data/0/value").asInt());
+		assertEquals("COUNT", pie.at("/dataAgent/valueMode").asText());
+		changes.setChartType("bar"); changes.setYAxisMax(5000D);
+		var bar = JsonUtil.getObjectMapper().readTree(editor.apply(pie.toString(), changes));
+		assertEquals(1375, bar.at("/series/0/data/0").asInt());
+		assertEquals(542, bar.at("/series/0/data/1").asInt());
+		assertEquals(4456, bar.at("/series/0/data/2").asInt());
+		assertEquals(5000D, bar.at("/yAxis/max").asDouble());
+		assertEquals("COUNT", bar.at("/dataAgent/valueMode").asText());
+	}
+
+	@Test
+	void percentageChartRoundTripPreservesAllDenominator() throws Exception {
+		String source = """
+		{"xAxis":{"data":["杂质","前划","水滴"]},"series":[{"type":"bar","data":[51.30,10.13,9.41]}],
+		"dataAgent":{"verified":true,"mutuallyExclusive":true,"allTotal":6622,"denominator":6622,
+		"denominatorScope":"ALL","valueMode":"PERCENTAGE","baseItems":[{"id":"1","name":"杂质","value":3397},
+		{"id":"2","name":"前划","value":671},{"id":"3","name":"水滴","value":623}]}}
+		""";
+		var editor = new PresentationSpecEditor();
+		var changes = new OperationPlan.PresentationChanges(); changes.setChartType("pie");
+		String pie = editor.apply(source, changes);
+		changes.setChartType("bar");
+		var bar = JsonUtil.getObjectMapper().readTree(editor.apply(pie, changes));
+		assertEquals(51.30, bar.at("/series/0/data/0").asDouble());
+		assertEquals(10.13, bar.at("/series/0/data/1").asDouble());
+		assertEquals(9.41, bar.at("/series/0/data/2").asDouble());
+		assertEquals(6622, bar.at("/dataAgent/denominator").asInt());
+		assertEquals("PERCENTAGE", bar.at("/dataAgent/valueMode").asText());
+	}
+
+	@Test
+	void allDefectPercentagesConvertedToPieIncludeTheRemainder() throws Exception {
+		String source = """
+		{"xAxis":{"data":["杂质","前划","水滴"]},"yAxis":{"type":"value"},"series":[{"type":"bar","data":[51.30,10.13,9.41]}],
+		"dataAgent":{"verified":true,"mutuallyExclusive":true,"allTotal":6622,"denominator":6622,"denominatorScope":"ALL","valueMode":"PERCENTAGE","percentage":true,"baseItems":[
+		{"id":"1","name":"杂质","value":3397},{"id":"2","name":"前划","value":671},{"id":"3","name":"水滴","value":623}]}}
+		""";
+		var changes = new OperationPlan.PresentationChanges(); changes.setChartType("pie");
+		var result = JsonUtil.getObjectMapper().readTree(new PresentationSpecEditor().apply(source, changes));
+		assertEquals(4, result.at("/series/0/data").size());
+		assertEquals(3397, result.at("/series/0/data/0/value").asInt());
+		assertEquals(1931, result.at("/series/0/data/3/value").asInt());
+		assertEquals(6622, result.at("/dataAgent/denominator").asInt());
 	}
 }

@@ -44,4 +44,12 @@ class LocalResultTransformerTest {
 		assertEquals("ref-2", new LocalResultTransformer(store).transform(source, changes));
 	}
 
+	@Test
+	void persistsRecalculatedChartValuesAsANewResult() {
+		when(store.put(eq("s1"), eq("[{\"category\":\"杂质\",\"value\":51.3}]"), any())).thenReturn("derived-ref");
+		String spec = "{\"xAxis\":{\"data\":[\"杂质\"]},\"series\":[{\"data\":[51.3]}]}";
+		assertEquals("derived-ref", new LocalResultTransformer(store).storeChartValues(
+				AnalysisArtifact.builder().sessionId("s1").build(), spec));
+	}
+
 }

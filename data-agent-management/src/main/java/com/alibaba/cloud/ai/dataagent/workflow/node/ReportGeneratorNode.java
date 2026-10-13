@@ -43,6 +43,8 @@ import java.util.Map;
 import java.util.Comparator;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import com.alibaba.cloud.ai.dataagent.util.JsonUtil;
+import com.alibaba.cloud.ai.dataagent.util.PaintDefectAnalysis;
 
 import static com.alibaba.cloud.ai.dataagent.constant.Constant.*;
 
@@ -94,6 +96,14 @@ public class ReportGeneratorNode implements NodeAction {
 		@SuppressWarnings("unchecked")
 		List<Map<String, String>> lineageSources = StateUtil.getObjectValue(state, DATA_LINEAGE_SOURCES, List.class,
 				List.of());
+		for (String executionResult : executionResults.values()) {
+			try {
+				if (JsonUtil.getObjectMapper().readTree(executionResult).path("truncated").asBoolean()) {
+					throw new IllegalStateException("查询结果超过行数上限并被截断，不能生成全量汇总、排名或比例报告。请改用数据库聚合查询。");
+				}
+			}
+			catch (com.fasterxml.jackson.core.JsonProcessingException ignored) { }
+		}
 
 		// Parse plan and get current step
 		Plan plan = converter.convert(plannerNodeOutput);
@@ -117,8 +127,12 @@ public class ReportGeneratorNode implements NodeAction {
 		// Tagged provider reasoning is removed across streaming chunks. The report itself
 		// does not need a transport marker or a special first-line format.
 		String lineageMarkdown = buildLineageMarkdown(lineageSources);
-		Flux<ChatResponse> generated = generateReport(userInput, plan, executionResults, summaryAndRecommendations,
-				resolvedAgentId, state);
+		String original = StateUtil.getStringValue(state, ORIGINAL_USER_QUERY, userInput);
+		boolean explicitAnalysis = original.matches("(?si).*(?:塑件缺陷|喷房缺陷|设备环境|全部|所有|top\\s*3|前三|三张图|总数|总计).*");
+		var verifiedReport = PaintDefectAnalysis.report(explicitAnalysis ? original : userInput, executionResults);
+		Flux<ChatResponse> generated = verifiedReport.isPresent()
+				? Flux.just(ChatResponseUtil.createPureResponse(verifiedReport.get()))
+				: generateReport(userInput, plan, executionResults, summaryAndRecommendations, resolvedAgentId, state);
 		Flux<ChatResponse> reportGenerationFlux = Flux.defer(() -> {
 			StringBuilder generatedReport = new StringBuilder();
 			Flux<ChatResponse> normalized = ChatResponseUtil.hideThinkingProcess(generated)

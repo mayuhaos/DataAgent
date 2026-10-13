@@ -31,20 +31,29 @@ import java.util.stream.Collectors;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.mockito.junit.jupiter.MockitoSettings;
 import org.mockito.quality.Strictness;
+import reactor.core.publisher.Flux;
 
 import com.alibaba.cloud.ai.dataagent.bo.DbConfigBO;
 import com.alibaba.cloud.ai.dataagent.bo.schema.ResultSetBO;
 import com.alibaba.cloud.ai.dataagent.connector.accessor.Accessor;
+import com.alibaba.cloud.ai.dataagent.dto.planner.ExecutionStep;
+import com.alibaba.cloud.ai.dataagent.dto.planner.Plan;
+import com.alibaba.cloud.ai.dataagent.properties.DataAgentProperties;
 import com.alibaba.cloud.ai.dataagent.service.llm.LlmService;
 import com.alibaba.cloud.ai.dataagent.service.nl2sql.Nl2SqlService;
+import com.alibaba.cloud.ai.dataagent.service.prompt.UserPromptService;
+import com.alibaba.cloud.ai.dataagent.util.ChatResponseUtil;
 import com.alibaba.cloud.ai.dataagent.util.DatabaseUtil;
 import com.alibaba.cloud.ai.dataagent.util.JsonParseUtil;
+import com.alibaba.cloud.ai.dataagent.util.JsonUtil;
+import com.alibaba.cloud.ai.dataagent.util.PlanProcessUtil;
+import com.alibaba.cloud.ai.dataagent.workflow.node.ReportGeneratorNode;
 import com.alibaba.cloud.ai.dataagent.workflow.node.SqlExecuteNode;
-import com.alibaba.cloud.ai.dataagent.properties.DataAgentProperties;
 import com.alibaba.cloud.ai.graph.OverAllState;
 import com.alibaba.cloud.ai.graph.state.strategy.ReplaceStrategy;
 
@@ -127,6 +136,51 @@ class SqlExecuteNodeTest {
 		when(nl2SqlService.sqlTrim(any(), any())).thenAnswer(inv -> inv.getArgument(0));
 		when(databaseUtil.getAgentDbConfig(1L)).thenReturn(dbConfig);
 		when(databaseUtil.getAgentAccessor(1L)).thenReturn(accessor);
+	}
+
+	@Test
+	void successfulSql_isPersistedAcrossStepsAndIncludedInReportPrompt() throws Exception {
+		OverAllState state = createTestState();
+		setupBasicState(state);
+		setupBasicMocks();
+		var plan = new Plan();
+		var first = new ExecutionStep.ToolParameters();
+		first.setInstruction("first query");
+		var second = new ExecutionStep.ToolParameters();
+		second.setInstruction("second query");
+		var report = new ExecutionStep.ToolParameters();
+		report.setSummaryAndRecommendations("summarize both queries");
+		plan.setExecutionPlan(List.of(new ExecutionStep(1, "SQL_GENERATE_NODE", first),
+				new ExecutionStep(2, "SQL_GENERATE_NODE", second),
+				new ExecutionStep(3, "REPORT_GENERATOR_NODE", report)));
+		state.updateState(Map.of(PLANNER_NODE_OUTPUT, JsonUtil.getObjectMapper().writeValueAsString(plan)));
+		var rows = new ResultSetBO();
+		rows.setColumn(List.of("id"));
+		rows.setData(List.of(Map.of("id", "1")));
+		when(accessor.executeSqlAndReturnObject(any(), any())).thenReturn(rows);
+		String firstSql = "SELECT id FROM users WHERE id = 1";
+		String secondSql = "SELECT id FROM users WHERE id = 2";
+		state.updateState(Map.of(SQL_GENERATE_OUTPUT, "raw first response"));
+		when(nl2SqlService.sqlTrim(any(), any())).thenReturn(firstSql);
+		state.updateState(getCompletionResult(consumeStreamingResult(sqlExecuteNode.apply(state))));
+		state.updateState(Map.of(SQL_GENERATE_OUTPUT, "raw second response"));
+		when(nl2SqlService.sqlTrim(any(), any())).thenReturn(secondSql);
+		state.updateState(getCompletionResult(consumeStreamingResult(sqlExecuteNode.apply(state))));
+		var persisted = PlanProcessUtil.getPlan(state);
+		assertEquals(firstSql, persisted.getExecutionPlan().get(0).getToolParameters().getSqlQuery());
+		assertEquals(secondSql, persisted.getExecutionPlan().get(1).getToolParameters().getSqlQuery());
+
+		var prompts = org.mockito.Mockito.mock(UserPromptService.class);
+		when(prompts.getOptimizationConfigs(anyString(), any())).thenReturn(List.of());
+		when(llmService.callWithState(anyString(), anyString(), any(), org.mockito.ArgumentMatchers.anyBoolean()))
+			.thenReturn(Flux.just(ChatResponseUtil.createPureResponse("# Report")));
+		new ReportGeneratorNode(llmService, prompts).apply(state);
+		var prompt = ArgumentCaptor.forClass(String.class);
+		org.mockito.Mockito.verify(llmService).callWithState(anyString(), prompt.capture(), any(),
+				org.mockito.ArgumentMatchers.eq(false));
+		assertTrue(prompt.getValue().contains("```sql\n" + firstSql + "\n```"));
+		assertTrue(prompt.getValue().contains("```sql\n" + secondSql + "\n```"));
+		assertFalse(prompt.getValue().contains("raw first response"));
 	}
 
 	@Test
@@ -259,7 +313,7 @@ class SqlExecuteNodeTest {
 	@SuppressWarnings("unchecked")
 	private List<com.alibaba.cloud.ai.graph.GraphResponse<com.alibaba.cloud.ai.graph.streaming.StreamingOutput>> consumeStreamingResult(
 			Map<String, Object> result) {
-		return ((reactor.core.publisher.Flux<com.alibaba.cloud.ai.graph.GraphResponse<com.alibaba.cloud.ai.graph.streaming.StreamingOutput>>) result
+		return ((Flux<com.alibaba.cloud.ai.graph.GraphResponse<com.alibaba.cloud.ai.graph.streaming.StreamingOutput>>) result
 			.get(SQL_EXECUTE_NODE_OUTPUT)).collectList().block();
 	}
 

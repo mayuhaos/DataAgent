@@ -269,6 +269,49 @@ class GraphServiceImplTest {
 	}
 
 	@Test
+	void multiQueryReportBindsEachChartToItsOwnSnapshot() throws Exception {
+		GraphRequest request = GraphRequest.builder().agentId("1").conversationId("session-1")
+				.threadId("multi-run").query("two metrics").build();
+		OverAllState state = mock(OverAllState.class);
+		var outputs = new java.util.ArrayList<com.alibaba.cloud.ai.graph.NodeOutput>();
+		for (int step = 1; step <= 2; step++) {
+			outputs.add(new StreamingOutput<>("$$$sql", "SqlExecuteNode", "", state));
+			outputs.add(new StreamingOutput<>("SELECT " + step + " AS value", "SqlExecuteNode", "", state));
+			outputs.add(new StreamingOutput<>("$$$", "SqlExecuteNode", "", state));
+			outputs.add(new StreamingOutput<>("$$$result_set", "SqlExecuteNode", "", state));
+			outputs.add(new StreamingOutput<>("{\"queryStep\":" + step
+					+ ",\"resultSet\":{\"column\":[\"value\"],\"data\":[{\"value\":\"" + step
+					+ "\"}]},\"displayStyle\":{\"type\":\"bar\"}}", "SqlExecuteNode", "", state));
+			outputs.add(new StreamingOutput<>("$$$", "SqlExecuteNode", "", state));
+		}
+		String report = "```echarts\n{\"dataAgent\":{\"sourceStep\":\"step_1\"},\"series\":[{\"type\":\"bar\",\"data\":[1]}]}\n```\n"
+				+ "```echarts\n{\"dataAgent\":{\"sourceStep\":\"step_2\"},\"series\":[{\"type\":\"bar\",\"data\":[2]}]}\n```";
+		outputs.add(new StreamingOutput<>("$$$markdown-report", "ReportGeneratorNode", "", state));
+		outputs.add(new StreamingOutput<>(report, "ReportGeneratorNode", "", state));
+		outputs.add(new StreamingOutput<>("$$$/markdown-report", "ReportGeneratorNode", "", state));
+		when(compiledGraph.stream(anyMap(), any(RunnableConfig.class))).thenReturn(Flux.fromIterable(outputs));
+		java.util.concurrent.atomic.AtomicInteger ids = new java.util.concurrent.atomic.AtomicInteger();
+		when(analysisArtifactService.save(any())).thenAnswer(invocation -> {
+			AnalysisArtifact artifact = invocation.getArgument(0);
+			artifact.setId("saved-" + ids.incrementAndGet());
+			return artifact;
+		});
+		Sinks.Many<ServerSentEvent<GraphNodeResponse>> sink = Sinks.many().multicast().onBackpressureBuffer();
+		CountDownLatch completed = new CountDownLatch(1);
+		sink.asFlux().subscribe(event -> { }, error -> completed.countDown(), completed::countDown);
+		graphService.graphStreamProcess(sink, request);
+		assertTrue(completed.await(5, TimeUnit.SECONDS));
+		var captured = org.mockito.ArgumentCaptor.forClass(AnalysisArtifact.class);
+		verify(analysisArtifactService, times(5)).save(captured.capture());
+		var saved = captured.getAllValues();
+		assertEquals("SELECT 1 AS value", saved.get(0).getSqlQuery());
+		assertEquals("SELECT 2 AS value", saved.get(1).getSqlQuery());
+		assertEquals(saved.get(0).getId(), saved.get(2).getParentArtifactId());
+		assertEquals(saved.get(1).getId(), saved.get(3).getParentArtifactId());
+		assertEquals(2, JsonUtil.getObjectMapper().readTree(saved.get(4).getProvenance()).path("sourceQueryResultIds").size());
+	}
+
+	@Test
 	void graphStreamProcess_newTurnClearsCheckpointedLineageSources() throws InterruptedException {
 		GraphRequest request = GraphRequest.builder()
 			.agentId("1")

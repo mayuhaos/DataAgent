@@ -155,6 +155,8 @@ public class SqlGenerateNode implements NodeAction {
 		SqlGenerationDTO sqlGenerationDTO = SqlGenerationDTO.builder()
 			.evidence(evidence)
 			.query(userQuery)
+			.originalQuery(StateUtil.getStringValue(state, ORIGINAL_USER_QUERY, userQuery))
+			.scopeRestricted(StateUtil.getStringValue(state, MULTI_TURN_CONTEXT, "").contains("服务端强制数据范围"))
 			.schemaDTO(schemaDTO)
 			.sql(originalSql)
 			.exceptionMessage(errorMsg)

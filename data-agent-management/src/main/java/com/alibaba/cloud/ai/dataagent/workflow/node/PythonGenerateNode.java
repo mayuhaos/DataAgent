@@ -118,6 +118,16 @@ public class PythonGenerateNode implements NodeAction {
 					objectMapper.writeValueAsString(schemaDTO), "sample_input",
 					objectMapper.writeValueAsString(sqlResults.stream().limit(SAMPLE_DATA_NUMBER).toList()),
 					"plan_description", objectMapper.writeValueAsString(toolParameters)));
+		var inputColumns = new java.util.TreeSet<String>();
+		sqlResults.forEach(row -> inputColumns.addAll(row.keySet()));
+		systemPrompt += "\n\n【实际输入字段】\n" + objectMapper.writeValueAsString(inputColumns)
+				+ "\n【生成当前输入的实际SQL】\n"
+				+ StateUtil.getStringValue(state, SQL_GENERATE_OUTPUT, "未提供SQL，不得猜测字段对应关系")
+				+ "\n数据库表结构不是Python输入结构。只能读取实际输入字段；根据SQL表达式识别别名，"
+				+ "例如SUM(check_total) AS production_count表示分母应读取production_count。"
+				+ "禁止仅按名称猜测production_count等于check_total，必须有SQL或明确字段定义支持。"
+				+ "所需字段不存在时必须抛出ValueError并列出实际输入字段，不得用None、0、dict.get默认值"
+				+ "或if column in df.columns掩盖字段匹配错误。字段存在但值为空、分母为零时，应分别说明原因。";
 
 		Flux<ChatResponse> pythonGenerateFlux = llmService.callWithState(systemPrompt, userPrompt, state);
 

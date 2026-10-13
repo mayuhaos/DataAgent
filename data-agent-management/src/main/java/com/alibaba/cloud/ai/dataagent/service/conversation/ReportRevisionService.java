@@ -36,7 +36,7 @@ public class ReportRevisionService {
 
 	public String renderChart(AnalysisArtifact source, String presentationSpec) {
 		String content = "## 图表已更新\n\n```echarts\n" + presentationSpec
-				+ "\n```\n\n" + "统计口径和数据沿用原报表。\n";
+				+ "\n```\n\n" + "数据来源沿用原查询结果；指标和分母以当前图表为准。\n";
 		return analysisResultStore.put(source.getSessionId(), content, Duration.ofHours(1));
 	}
 

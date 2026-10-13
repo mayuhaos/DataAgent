@@ -19,6 +19,10 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import lombok.Data;
+import lombok.Getter;
+import lombok.Setter;
+import com.fasterxml.jackson.annotation.JsonProperty;
+import com.fasterxml.jackson.annotation.JsonAlias;
 
 /** Structured, non-executable plan returned by the conversation planner. */
 @Data
@@ -64,6 +68,8 @@ public class OperationPlan {
 		private String grain;
 		private String sort;
 		private Integer limit;
+		/** Explicit denominator scope; never treated as a presentation-only title. */
+		private String denominatorScope;
 	}
 
 	@Data
@@ -76,9 +82,17 @@ public class OperationPlan {
 		private String title;
 		private List<String> visibleFields = new ArrayList<>();
 		/** Display-only axis bounds. These must never be interpreted as data filters. */
+		@Getter(onMethod_ = @JsonProperty("xAxisMin"))
+		@Setter(onMethod_ = {@JsonProperty("xAxisMin"), @JsonAlias("xaxisMin")})
 		private Double xAxisMin;
+		@Getter(onMethod_ = @JsonProperty("xAxisMax"))
+		@Setter(onMethod_ = {@JsonProperty("xAxisMax"), @JsonAlias("xaxisMax")})
 		private Double xAxisMax;
+		@Getter(onMethod_ = @JsonProperty("yAxisMin"))
+		@Setter(onMethod_ = {@JsonProperty("yAxisMin"), @JsonAlias("yaxisMin")})
 		private Double yAxisMin;
+		@Getter(onMethod_ = @JsonProperty("yAxisMax"))
+		@Setter(onMethod_ = {@JsonProperty("yAxisMax"), @JsonAlias("yaxisMax")})
 		private Double yAxisMax;
 		private Boolean legendVisible;
 	}

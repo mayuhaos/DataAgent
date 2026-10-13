@@ -39,4 +39,8 @@ public class SqlGenerationDTO {
 
 	private String dialect;
 
+	private String originalQuery;
+
+	private Boolean scopeRestricted;
+
 }

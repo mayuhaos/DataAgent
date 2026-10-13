@@ -395,6 +395,16 @@ class ReportGeneratorNodeTest {
 	}
 
 	@Test
+	void applyRejectsTruncatedResultBeforeCallingReportModel() {
+		OverAllState state = createTestState(); setupBasicState(state);
+		var results = new HashMap<String, String>();
+		results.put("step_1", "{\"column\":[\"category\"],\"data\":[],\"truncated\":true}");
+		state.updateState(Map.of(SQL_EXECUTE_NODE_OUTPUT, results));
+		assertThrows(IllegalStateException.class, () -> reportGeneratorNode.apply(state));
+		org.mockito.Mockito.verifyNoInteractions(llmService);
+	}
+
+	@Test
 	private String collectVisibleOutput(Flux<GraphResponse<StreamingOutput>> stream) {
 		return stream.collectList().block().stream().filter(response -> !response.isDone()).map(response -> {
 			try {
