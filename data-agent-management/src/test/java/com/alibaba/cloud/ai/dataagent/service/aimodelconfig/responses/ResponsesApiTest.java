@@ -71,6 +71,94 @@ class ResponsesApiTest {
 	}
 
 	@Test
+	void synchronousCallReadsBrotliResponseWithoutSingleByteProbe() throws Exception {
+		var server = com.sun.net.httpserver.HttpServer.create(new java.net.InetSocketAddress(0), 0);
+		server.createContext("/v1/responses", exchange -> {
+			exchange.getRequestBody().readAllBytes();
+			exchange.getResponseHeaders().add("Content-Type", "application/json");
+			exchange.getResponseHeaders().add("Content-Encoding", "br");
+			exchange.sendResponseHeaders(200, 0);
+			// Brotli-compressed {"id":"brotli-response","status":"completed","output":[]}.
+			try (var output = exchange.getResponseBody()) {
+				output.write(java.util.Base64.getDecoder().decode(
+					"CxyAeyJpZCI6ImJyb3RsaS1yZXNwb25zZSIsInN0YXR1cyI6ImNvbXBsZXRlZCIsIm91dHB1dCI6W119Aw=="));
+			}
+		});
+		server.start();
+		try {
+			var api = new ResponsesApi("http://localhost:" + server.getAddress().getPort(), "test-key", null,
+				RestClient.builder(), WebClient.builder());
+			var result = api.call(new ResponsesApi.ResponsesRequest("test", null, java.util.List.of(),
+				null, null, null, null, null, false));
+			assertEquals("brotli-response", result.id());
+		}
+		finally {
+			server.stop(0);
+		}
+	}
+
+	@Test
+	void synchronousCallReadsGzipResponseAfterOpeningBraceFlush() throws Exception {
+		var server = com.sun.net.httpserver.HttpServer.create(new java.net.InetSocketAddress(0), 0);
+		server.createContext("/v1/responses", exchange -> {
+			exchange.getRequestBody().readAllBytes();
+			exchange.getResponseHeaders().add("Content-Type", "application/json");
+			exchange.getResponseHeaders().add("Content-Encoding", "gzip");
+			exchange.sendResponseHeaders(200, 0);
+			try (var output = new java.util.zip.GZIPOutputStream(exchange.getResponseBody(), true)) {
+				output.write('{');
+				output.flush();
+				java.util.concurrent.locks.LockSupport.parkNanos(java.util.concurrent.TimeUnit.MILLISECONDS.toNanos(100));
+				output.write("\"id\":\"gzip-chunked\",\"status\":\"completed\",\"output\":[]}"
+					.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+			}
+		});
+		server.start();
+		try {
+			var api = new ResponsesApi("http://localhost:" + server.getAddress().getPort(), "test-key", null,
+				RestClient.builder(), WebClient.builder());
+			var result = api.call(new ResponsesApi.ResponsesRequest("test", null, java.util.List.of(),
+				null, null, null, null, null, false));
+			assertEquals("gzip-chunked", result.id());
+		}
+		finally {
+			server.stop(0);
+		}
+	}
+
+	@Test
+	void synchronousCallPreservesNonRetryableHttpErrors() throws Exception {
+		assertHttpError(401, org.springframework.ai.retry.NonTransientAiException.class);
+	}
+
+	@Test
+	void synchronousCallPreservesRetryableHttpErrors() throws Exception {
+		assertHttpError(503, org.springframework.ai.retry.TransientAiException.class);
+	}
+
+	private void assertHttpError(int status, Class<? extends Throwable> expected) throws Exception {
+		var server = com.sun.net.httpserver.HttpServer.create(new java.net.InetSocketAddress(0), 0);
+		server.createContext("/v1/responses", exchange -> {
+			exchange.getRequestBody().readAllBytes();
+			byte[] body = "{\"error\":{\"message\":\"test error\"}}".getBytes(java.nio.charset.StandardCharsets.UTF_8);
+			exchange.sendResponseHeaders(status, body.length);
+			try (var output = exchange.getResponseBody()) {
+				output.write(body);
+			}
+		});
+		server.start();
+		try {
+			var api = new ResponsesApi("http://localhost:" + server.getAddress().getPort(), "test-key", null,
+				RestClient.builder(), WebClient.builder());
+			assertThrows(expected, () -> api.call(new ResponsesApi.ResponsesRequest("test", null, java.util.List.of(),
+				null, null, null, null, null, false)));
+		}
+		finally {
+			server.stop(0);
+		}
+	}
+
+	@Test
 	void parseDeltaEvent_returnsDeltaText() {
 		StreamEvent event = parse(
 				"{\"type\":\"response.output_text.delta\",\"output_index\":3,\"delta\":\"Hello\"}");

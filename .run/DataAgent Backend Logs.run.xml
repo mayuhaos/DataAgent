@@ -1,0 +1,30 @@
+<component name="ProjectRunConfigurationManager">
+  <configuration default="false" name="DataAgent后端8065（日志）" type="MavenRunConfiguration" factoryName="Maven">
+    <MavenSettings>
+      <option name="myGeneralSettings" />
+      <option name="myRunnerSettings">
+        <MavenRunnerSettings>
+          <option name="jreName" value="17" />
+          <option name="passParentEnv" value="true" />
+          <option name="skipTests" value="false" />
+        </MavenRunnerSettings>
+      </option>
+      <option name="myRunnerParameters">
+        <MavenRunnerParameters>
+          <option name="goals">
+            <list>
+              <option value="-pl" />
+              <option value="data-agent-management" />
+              <option value="-Dspotless.skip=true" />
+              <option value="-Dspring-boot.run.arguments=--spring.ai.alibaba.data-agent.code-executor.host=unix:///Users/scy/.docker/run/docker.sock" />
+              <option value="spring-boot:run" />
+            </list>
+          </option>
+          <option name="workingDirPath" value="$PROJECT_DIR$" />
+        </MavenRunnerParameters>
+      </option>
+    </MavenSettings>
+    <output_file path="$PROJECT_DIR$/../dataagent-backend.log" is_save="true" />
+    <method v="2" />
+  </configuration>
+</component>

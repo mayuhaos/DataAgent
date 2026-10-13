@@ -1,0 +1,14 @@
+<component name="ProjectRunConfigurationManager">
+  <configuration default="false" name="DataAgent前端3001（日志）" type="ShConfigurationType">
+    <option name="SCRIPT_TEXT" value="export PATH=&quot;/Users/scy/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin:$PATH&quot;; exec node node_modules/nuxt/bin/nuxt.mjs dev --port 3001" />
+    <option name="SCRIPT_PATH" value="" />
+    <option name="SCRIPT_OPTIONS" value="" />
+    <option name="SCRIPT_WORKING_DIRECTORY" value="$PROJECT_DIR$/data-agent-user-frontend-nuxt" />
+    <option name="INTERPRETER_PATH" value="/bin/zsh" />
+    <option name="INTERPRETER_OPTIONS" value="" />
+    <option name="EXECUTE_IN_TERMINAL" value="false" />
+    <option name="EXECUTE_SCRIPT_FILE" value="false" />
+    <output_file path="$PROJECT_DIR$/../dataagent-frontend.log" is_save="true" />
+    <method v="2" />
+  </configuration>
+</component>

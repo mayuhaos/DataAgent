@@ -31,6 +31,7 @@ import org.springframework.web.client.RestClient;
 import org.springframework.web.reactive.function.client.WebClient;
 import reactor.core.publisher.Flux;
 
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
 
@@ -56,15 +57,10 @@ public class ResponsesApi {
 			WebClient.Builder webClientBuilder) {
 		this.responsesPath = StringUtils.hasText(responsesPath) ? responsesPath : "/v1/responses";
 
-		// 构建同步 RestClient（用于阻塞调用）。
-		// 必须挂载 DEFAULT_RESPONSE_ERROR_HANDLER：它把 4xx 映射为 NonTransientAiException、
-		// 5xx 映射为 TransientAiException，而上层 DEFAULT_RETRY_TEMPLATE 只对 TransientAiException
-		// 重试——
-		// 若不挂载，HTTP 错误抛出的是 RestClientResponseException，重试模板会直接放行，重试形同虚设
+		// exchange handles HTTP errors explicitly before reading the response body.
 		this.restClient = restClientBuilder.baseUrl(baseUrl)
 			.defaultHeader("Authorization", "Bearer " + apiKey)
 			.defaultHeader("Content-Type", "application/json")
-			.defaultStatusHandler(RetryUtils.DEFAULT_RESPONSE_ERROR_HANDLER)
 			.build();
 
 		// 构建异步 WebClient（用于 SSE 流式调用）
@@ -85,18 +81,25 @@ public class ResponsesApi {
 		// 确保非流式
 		ResponsesRequest syncRequest = request.withStream(false);
 
-		// Compatible providers may send the opening brace before the remaining JSON.
-		// Read the complete HTTP body before decoding rather than parsing live chunks.
-		String body = restClient.post().uri(this.responsesPath).body(syncRequest).retrieve().body(String.class);
-		try {
-			if (!StringUtils.hasText(body)) {
-				throw new IllegalStateException("Responses API returned an empty response");
+		// retrieve() probes one byte through a PushbackInputStream. With Brotli 0.1.2
+		// that probe makes subsequent reads end early; consume the original stream.
+		return restClient.post().uri(this.responsesPath).body(syncRequest).exchange((httpRequest, response) -> {
+			if (RetryUtils.DEFAULT_RESPONSE_ERROR_HANDLER.hasError(response)) {
+				RetryUtils.DEFAULT_RESPONSE_ERROR_HANDLER.handleError(httpRequest.getURI(), httpRequest.getMethod(), response);
 			}
-			return OBJECT_MAPPER.readValue(body, ResponsesResponse.class);
-		}
-		catch (JsonProcessingException ex) {
-			throw new IllegalStateException("Responses API returned invalid JSON (length=" + body.length() + ")", ex);
-		}
+			byte[] bytes = response.getBody().readAllBytes();
+			log.debug("Responses API HTTP {}: read {} response bytes", response.getStatusCode().value(), bytes.length);
+			String body = new String(bytes, StandardCharsets.UTF_8);
+			try {
+				if (!StringUtils.hasText(body)) {
+					throw new IllegalStateException("Responses API returned an empty response");
+				}
+				return OBJECT_MAPPER.readValue(body, ResponsesResponse.class);
+			}
+			catch (JsonProcessingException ex) {
+				throw new IllegalStateException("Responses API returned invalid JSON (length=" + body.length() + ")", ex);
+			}
+		});
 	}
 
 	// ======================== 流式调用 ========================
