@@ -43,6 +43,9 @@ public class GraphRequest {
 	/** Server-owned filters supplied by the authenticated integration caller. */
 	private Map<String, String> scopeContext;
 
+	/** Explicit denominator change preserved across query enhancement and a requery. */
+	private String requestedDenominatorScope;
+
 	private boolean humanFeedback;
 
 	private String humanFeedbackContent;

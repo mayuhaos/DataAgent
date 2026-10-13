@@ -75,6 +75,74 @@ class ConversationServiceTest {
 	}
 
 	@Test
+	void explicitlyDatedRecordCountRunsQueryEvenForAFutureDate() {
+		var request = new ConversationMessageRequest();
+		request.setUserMessage("一厂2099年1月1日喷涂完整缺陷明细有几条记录？是否可以据此认定当天没有不良？");
+		var result = service.submit("session-1", request);
+		assertEquals("DISPATCH_TO_GRAPH", result.getStatus());
+		org.mockito.Mockito.verifyNoInteractions(conversationPlanClient);
+	}
+
+	@Test
+	void unqualifiedShareEditOfMultiChartReportAsksWhichChart() {
+		var first = com.alibaba.cloud.ai.dataagent.entity.AnalysisArtifact.builder()
+				.id("chart-1").sessionId("session-1").type("CHART").build();
+		var second = com.alibaba.cloud.ai.dataagent.entity.AnalysisArtifact.builder()
+				.id("chart-2").sessionId("session-1").type("CHART").build();
+		when(analysisArtifactService.findBySessionId("session-1")).thenReturn(List.of(first, second));
+		when(artifactReferenceResolver.resolve(eq("上面这个图"), any())).thenReturn(
+				ArtifactReferenceResolver.Resolution.ambiguous(List.of(
+						new ArtifactReferenceResolver.Card("chart-1", "图表01", "数量"),
+						new ArtifactReferenceResolver.Card("chart-2", "图表02", "占比"))));
+		var request = new ConversationMessageRequest(); request.setUserMessage("改成占全部缺陷的比例。");
+		var result = service.submit("session-1", request);
+		assertEquals("CLARIFICATION", result.getStatus());
+		org.junit.jupiter.api.Assertions.assertTrue(result.getMessage().contains("图表编号"));
+		org.mockito.Mockito.verifyNoInteractions(conversationPlanClient, presentationSpecEditor);
+		verify(analysisArtifactService, org.mockito.Mockito.never()).save(any());
+	}
+
+	@Test
+	void nonexistentExplicitDateIsClarifiedBeforePlanning() {
+		var request = new ConversationMessageRequest();
+		request.setUserMessage("查询一厂2026年2月30日喷涂完整缺陷Top3");
+		var response = service.submit("session-1", request);
+		assertEquals("CLARIFICATION", response.getStatus());
+		org.junit.jupiter.api.Assertions.assertTrue(response.getMessage().contains("日期“2026年2月30日”不存在"));
+		org.mockito.Mockito.verifyNoInteractions(conversationPlanClient);
+	}
+
+	@Test
+	void cancelledPlanCannotSaveMessagesOrArtifactsEvenIfPlannerReturnsNormally() {
+		org.mockito.Mockito.reset(conversationAuditService);
+		var cancelled = new java.util.concurrent.atomic.AtomicBoolean();
+		when(conversationPlanClient.plan(eq("测试问题"), any(), any(), any())).thenAnswer(invocation -> {
+			cancelled.set(true);
+			var plan = new OperationPlan(); plan.setExecutionMode(OperationPlan.ExecutionMode.REQUERY);
+			return plan;
+		});
+		var request = new ConversationMessageRequest(); request.setUserMessage("测试问题");
+		org.junit.jupiter.api.Assertions.assertThrows(ConversationCancelledException.class,
+				() -> service.submit("session-1", request, cancelled::get));
+		org.mockito.Mockito.verifyNoInteractions(chatMessageService);
+		verify(analysisArtifactService, org.mockito.Mockito.never()).save(any());
+	}
+
+	@Test
+	void explicitNewDateWithOwnSharePieDoesNotReusePreviousMonth() {
+		String question = "查询一厂2026年6月1日塑件缺陷、喷房缺陷、设备环境完整明细数量，按这三项指标自身占比展示饼图。";
+		var source = com.alibaba.cloud.ai.dataagent.entity.AnalysisArtifact.builder()
+				.id("chart-1").sessionId("session-1").type("CHART").presentationSpec("{}").build();
+		when(analysisArtifactService.findBySessionId("session-1")).thenReturn(List.of(source));
+		var plan = new OperationPlan();
+		plan.setExecutionMode(OperationPlan.ExecutionMode.REQUERY);
+		when(conversationPlanClient.plan(eq(question), any(), any(), any())).thenReturn(plan);
+		var request = new ConversationMessageRequest(); request.setUserMessage(question);
+		assertEquals("DISPATCH_TO_GRAPH", service.submit("session-1", request).getStatus());
+		org.mockito.Mockito.verifyNoInteractions(presentationSpecEditor);
+	}
+
+	@Test
 	void chartOnlyRequestReusesLatestResultWithoutCallingPlanner() {
 		var source = com.alibaba.cloud.ai.dataagent.entity.AnalysisArtifact.builder()
 				.id("chart-1").sessionId("session-1").type("CHART").sqlQuery("original SQL")

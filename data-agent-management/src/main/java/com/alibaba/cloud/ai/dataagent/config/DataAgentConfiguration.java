@@ -189,6 +189,7 @@ public class DataAgentConfiguration implements DisposableBean {
 			keyStrategyHashMap.put(CLARIFICATION_COUNT, KeyStrategy.REPLACE);
 			keyStrategyHashMap.put(AWAITING_CLARIFICATION, KeyStrategy.REPLACE);
 			keyStrategyHashMap.put(ORIGINAL_USER_QUERY, KeyStrategy.REPLACE);
+			keyStrategyHashMap.put(REQUESTED_DENOMINATOR_SCOPE, KeyStrategy.REPLACE);
 			keyStrategyHashMap.put(REFINED_USER_QUERY, KeyStrategy.REPLACE);
 			// sql generate节点输出
 			keyStrategyHashMap.put(SQL_GENERATE_SCHEMA_MISSING_ADVICE, KeyStrategy.REPLACE);

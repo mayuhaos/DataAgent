@@ -83,6 +83,7 @@ import static com.alibaba.cloud.ai.dataagent.constant.Constant.HUMAN_FEEDBACK_DA
 import static com.alibaba.cloud.ai.dataagent.constant.Constant.HUMAN_FEEDBACK_NODE;
 import static com.alibaba.cloud.ai.dataagent.constant.Constant.HUMAN_REVIEW_ENABLED;
 import static com.alibaba.cloud.ai.dataagent.constant.Constant.INPUT_KEY;
+import static com.alibaba.cloud.ai.dataagent.constant.Constant.REQUESTED_DENOMINATOR_SCOPE;
 import static com.alibaba.cloud.ai.dataagent.constant.Constant.IS_ONLY_NL2SQL;
 import static com.alibaba.cloud.ai.dataagent.constant.Constant.MULTI_TURN_CONTEXT;
 import static com.alibaba.cloud.ai.dataagent.constant.Constant.REASONING_EFFORT;
@@ -276,6 +277,11 @@ public class GraphServiceImpl implements GraphService {
 		if (context.getSpan() != null && context.getSpan().isRecording()) {
 			langfuseReporter.endSpanSuccess(context.getSpan(), threadId, context.getCollectedOutput());
 		}
+		if (context.getSink() != null) {
+			GraphNodeResponse stopped = GraphNodeResponse.complete(context.getAgentId(), threadId);
+			stopped.setText("任务已停止，未发布新报告。");
+			context.getSink().tryEmitNext(ServerSentEvent.builder(stopped).event(STREAM_EVENT_COMPLETE).build());
+		}
 		context.cleanup();
 		log.info("Cleaned up stream context for threadId: {}", threadId);
 		return true;
@@ -353,6 +359,8 @@ public class GraphServiceImpl implements GraphService {
 			.nl2sqlOnly(graphRequest.isNl2sqlOnly())
 			.thinkingEnabled(graphRequest.getThinkingEnabled())
 			.reasoningEffort(graphRequest.getReasoningEffort())
+			.requestedDenominatorScope(graphRequest.getRequestedDenominatorScope())
+			.scopeContext(graphRequest.getScopeContext())
 			.build();
 
 		handleNewProcess(resumedRequest, snapshot.originalQuery(), refinedQuery, snapshot.clarificationCount(),
@@ -385,10 +393,13 @@ public class GraphServiceImpl implements GraphService {
 		String multiTurnContext = buildMultiTurnContext(graphRequest, multiTurnContextId);
 		multiTurnContextManager.beginTurn(multiTurnContextId, inputQuery);
 		Integer modelConfigId = chatSessionService.resolveModelConfigId(graphRequest.getConversationId());
-		Flux<NodeOutput> nodeOutputFlux = compiledGraph.stream(
-				buildInitialState(agentId, threadId, inputQuery, originalUserQuery, multiTurnContext, graphRequest.getScopeContext(), nl2sqlOnly,
+		Map<String, Object> initialState = buildInitialState(agentId, threadId, inputQuery, originalUserQuery, multiTurnContext, graphRequest.getScopeContext(), nl2sqlOnly,
 						humanReviewEnabled, clarificationCount, clarificationAnswer, graphRequest.getThinkingEnabled(),
-						graphRequest.getReasoningEffort(), modelConfigId, graphRequest.getConversationId()),
+						graphRequest.getReasoningEffort(), modelConfigId, graphRequest.getConversationId());
+		if (StringUtils.hasText(graphRequest.getRequestedDenominatorScope())) {
+			initialState.put(REQUESTED_DENOMINATOR_SCOPE, graphRequest.getRequestedDenominatorScope());
+		}
+		Flux<NodeOutput> nodeOutputFlux = compiledGraph.stream(initialState,
 				RunnableConfig.builder().threadId(threadId).build());
 		subscribeToFlux(context, nodeOutputFlux, graphRequest, agentId, threadId);
 	}

@@ -131,7 +131,11 @@ public class StateUtil {
 		QueryEnhanceOutputDTO queryEnhanceOutputDTO = getObjectValue(state, QUERY_ENHANCE_NODE_OUTPUT,
 				QueryEnhanceOutputDTO.class);
 		// 获取canonical_query
-		return queryEnhanceOutputDTO.getCanonicalQuery();
+		String query = queryEnhanceOutputDTO.getCanonicalQuery();
+		String denominator = getStringValue(state, com.alibaba.cloud.ai.dataagent.constant.Constant.REQUESTED_DENOMINATOR_SCOPE, "");
+		if ("ALL".equals(denominator)) return query + "；占全部缺陷数量，分母用同一工厂和日期下所有缺陷大类合计，不因所选大类过滤分母。";
+		if ("SELECTED".equals(denominator) || "TOP".equals(denominator)) return query + "；按所选缺陷自身占比，分母用所选缺陷数量合计。";
+		return query;
 	}
 
 }

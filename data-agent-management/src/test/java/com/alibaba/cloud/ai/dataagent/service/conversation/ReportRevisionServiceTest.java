@@ -36,6 +36,16 @@ class ReportRevisionServiceTest {
 	@Mock private LlmService llmService;
 
 	@Test
+	void modelCannotPublishChangedDataDuringStyleRewrite() {
+		when(resultStore.get("s1", "report-ref")).thenReturn("合格15，不合格1。\n");
+		when(llmService.blockToString(any())).thenReturn("合格48，不合格16。");
+		var source = AnalysisArtifact.builder().sessionId("s1").contentRef("report-ref").build();
+		org.junit.jupiter.api.Assertions.assertThrows(com.alibaba.cloud.ai.dataagent.util.ReportFactsProtector.FactChangeException.class,
+				() -> new ReportRevisionService(resultStore, llmService).revise(source, new OperationPlan.ReportChanges()));
+		org.mockito.Mockito.verify(resultStore, org.mockito.Mockito.never()).put(any(), any(), any());
+	}
+
+	@Test
 	void revisesStoredReportWithoutReadingDatabase() {
 		when(resultStore.get("s1", "report-ref")).thenReturn("# Sales\nConclusion");
 		when(llmService.blockToString(any())).thenReturn("# Concise Sales");

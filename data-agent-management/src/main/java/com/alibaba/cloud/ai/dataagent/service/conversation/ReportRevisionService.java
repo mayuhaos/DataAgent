@@ -18,6 +18,7 @@ package com.alibaba.cloud.ai.dataagent.service.conversation;
 import com.alibaba.cloud.ai.dataagent.dto.conversation.OperationPlan;
 import com.alibaba.cloud.ai.dataagent.entity.AnalysisArtifact;
 import com.alibaba.cloud.ai.dataagent.service.llm.LlmService;
+import com.alibaba.cloud.ai.dataagent.util.ReportFactsProtector;
 import java.time.Duration;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -45,13 +46,16 @@ public class ReportRevisionService {
 			throw new IllegalStateException("report content unavailable");
 		}
 		String original = analysisResultStore.get(source.getSessionId(), source.getContentRef());
+		var protectedReport = ReportFactsProtector.protect(original);
 		String style = changes == null || changes.getStyle() == null ? "保持原有风格" : changes.getStyle();
 		String revised = llmService.blockToString(llmService.callUser(
-				"仅重写下列报告正文，不得调用工具、生成 SQL 或添加未提供的数据。风格：" + style + "\n\n" + original));
+				"仅调整下列报告的非数据文字风格，不得添加数值、表格、代码、图表或新业务结论。"
+						+ "每个 DATA_AGENT_FACT_ 占位符代表不可修改的数据块，必须原样保留一次，独占一行，不得加列表符号、缩进或代码围栏。"
+						+ "只返回调整后的报告。风格：" + style + "\n\n" + protectedReport.editable()));
 		if (revised == null || revised.isBlank()) {
 			throw new IllegalStateException("report revision returned no content");
 		}
-		return analysisResultStore.put(source.getSessionId(), revised, Duration.ofHours(1));
+		return analysisResultStore.put(source.getSessionId(), protectedReport.restore(revised), Duration.ofHours(1));
 	}
 
 }

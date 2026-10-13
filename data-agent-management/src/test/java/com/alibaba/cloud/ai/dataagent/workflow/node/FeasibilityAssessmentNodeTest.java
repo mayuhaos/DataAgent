@@ -27,6 +27,8 @@ import java.util.Map;
 import com.alibaba.cloud.ai.dataagent.common.TestFixtures;
 import com.alibaba.cloud.ai.dataagent.dto.prompt.QueryEnhanceOutputDTO;
 import com.alibaba.cloud.ai.dataagent.dto.schema.SchemaDTO;
+import com.alibaba.cloud.ai.dataagent.dto.schema.TableDTO;
+import com.alibaba.cloud.ai.dataagent.dto.prompt.FeasibilityAssessmentOutputDTO;
 import com.alibaba.cloud.ai.dataagent.service.llm.LlmService;
 import com.alibaba.cloud.ai.dataagent.util.ChatResponseUtil;
 import com.alibaba.cloud.ai.dataagent.util.JsonParseUtil;
@@ -40,6 +42,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.mockito.junit.jupiter.MockitoSettings;
 import org.mockito.quality.Strictness;
 import reactor.core.publisher.Flux;
+import java.util.List;
 
 @ExtendWith(MockitoExtension.class)
 @MockitoSettings(strictness = Strictness.LENIENT)
@@ -74,6 +77,24 @@ class FeasibilityAssessmentNodeTest {
 		schema.setTable(new ArrayList<>());
 		schema.setForeignKeys(new ArrayList<>());
 		return schema;
+	}
+
+	@Test
+	void boundedPaintQueryDoesNotRequireModelClarification() throws Exception {
+		OverAllState state = createTestState();
+		SchemaDTO schema = createSimpleSchema();
+		TableDTO detail = new TableDTO();
+		detail.setName("paint_defect_detail");
+		TableDTO dictionary = new TableDTO();
+		dictionary.setName("paint_defect_dictionary");
+		schema.setTable(List.of(detail, dictionary));
+		state.updateState(Map.of(QUERY_ENHANCE_NODE_OUTPUT,
+				TestFixtures.createQueryEnhanceDTO("一厂2026年6月设备环境完整缺陷数量是多少？"),
+				TABLE_RELATION_OUTPUT, schema, EVIDENCE, "完整缺陷明细"));
+		Map<String, Object> result = feasibilityAssessmentNode.apply(state);
+		FeasibilityAssessmentOutputDTO assessment = (FeasibilityAssessmentOutputDTO) result.get(FEASIBILITY_ASSESSMENT_NODE_OUTPUT);
+		assertEquals(FeasibilityAssessmentOutputDTO.RequirementType.DATA_ANALYSIS, assessment.getRequirementType());
+		org.mockito.Mockito.verifyNoInteractions(llmService);
 	}
 
 	@Test

@@ -24,6 +24,51 @@ import org.junit.jupiter.api.Test;
 class PresentationSpecEditorTest {
 
 	@Test
+	void parentTotalIsNotTheFullFactoryDenominator() throws Exception {
+		String source = """
+		{"xAxis":{"data":["杂质"]},"series":[{"type":"bar","data":[76.23]}],
+		"dataAgent":{"verified":true,"mutuallyExclusive":true,"denominator":4456,
+		"denominatorScope":"SCOPE","valueMode":"PERCENTAGE","baseItems":[{"id":"1","name":"杂质","value":3397}]}}
+		""";
+		var editor = new PresentationSpecEditor();
+		var changes = new OperationPlan.PresentationChanges(); changes.setChartType("pie");
+		var pie = JsonUtil.getObjectMapper().readTree(editor.apply(source, changes));
+		assertEquals(4456, pie.at("/dataAgent/denominator").asInt());
+		assertEquals(1059, pie.at("/series/0/data/1/value").asInt());
+		org.junit.jupiter.api.Assertions.assertThrows(IllegalArgumentException.class, () -> editor.transformShares(source, "ALL"));
+	}
+
+	@Test
+	void countTopPiePreservesFullDenominatorOrExplicitlySwitchesToOwnShares() throws Exception {
+		String source = """
+		{"title":{"text":"Top1缺陷数量"},"xAxis":{"data":["杂质"]},"series":[{"type":"bar","data":[3397]}],
+		"dataAgent":{"verified":true,"mutuallyExclusive":true,"allTotal":6622,"denominator":6622,
+		"denominatorScope":"ALL","valueMode":"COUNT","baseItems":[{"id":"1","name":"杂质","value":3397}]}}
+		""";
+		var editor = new PresentationSpecEditor();
+		var changes = new OperationPlan.PresentationChanges(); changes.setChartType("pie");
+		var pie = JsonUtil.getObjectMapper().readTree(editor.apply(source, changes));
+		assertEquals(2, pie.at("/series/0/data").size());
+		assertEquals(3225, pie.at("/series/0/data/1/value").asInt());
+		changes.setAllowPartialPie(true);
+		var own = JsonUtil.getObjectMapper().readTree(editor.apply(source, changes));
+		assertEquals(1, own.at("/series/0/data").size());
+		assertEquals(3397, own.at("/dataAgent/denominator").asInt());
+		assertEquals("SELECTED", own.at("/dataAgent/denominatorScope").asText());
+	}
+
+	@Test
+	void rejectsAxisRangeThatConflictsWithPreviouslySavedBound() {
+		var changes = new OperationPlan.PresentationChanges();
+		changes.setYAxisMax(5000D);
+		org.junit.jupiter.api.Assertions.assertThrows(IllegalArgumentException.class, () -> new PresentationSpecEditor().apply(
+				"{\"yAxis\":{\"min\":6000},\"series\":[{\"type\":\"bar\",\"data\":[15,1]}]}", changes));
+		changes.setYAxisMin(0D);
+		org.junit.jupiter.api.Assertions.assertDoesNotThrow(() -> new PresentationSpecEditor().apply(
+				"{\"yAxis\":{\"min\":6000}}", changes));
+	}
+
+	@Test
 	void pieToBarPreservesPointCounts() throws Exception {
 		OperationPlan.PresentationChanges changes = new OperationPlan.PresentationChanges();
 		changes.setChartType("bar");

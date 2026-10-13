@@ -20,6 +20,8 @@ import com.alibaba.cloud.ai.dataagent.entity.AnalysisArtifact;
 import com.alibaba.cloud.ai.dataagent.entity.ConversationTopic;
 import com.alibaba.cloud.ai.dataagent.service.chat.AnalysisArtifactService;
 import com.alibaba.cloud.ai.dataagent.service.conversation.ConversationService;
+import com.alibaba.cloud.ai.dataagent.service.conversation.ConversationExecutionRegistry;
+import com.alibaba.cloud.ai.dataagent.service.conversation.ConversationCancelledException;
 import com.alibaba.cloud.ai.dataagent.service.conversation.ConversationTopicService;
 import com.alibaba.cloud.ai.dataagent.service.conversation.AnalysisResultStore;
 import com.alibaba.cloud.ai.dataagent.vo.ConversationMessageResponse;
@@ -64,15 +66,27 @@ public class ConversationController {
 	private final AnalysisArtifactService analysisArtifactService;
 	private final GraphService graphService;
 	private final AnalysisResultStore analysisResultStore;
+	private final ConversationExecutionRegistry executionRegistry;
 
 	@PostMapping(value = "/conversations/{sessionId}/messages", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
 	public Flux<ServerSentEvent<GraphNodeResponse>> submit(@PathVariable String sessionId,
 			@RequestBody @Valid ConversationMessageRequest request, ServerHttpResponse response) {
 		response.getHeaders().add("Cache-Control", "no-cache");
 		response.getHeaders().add("Connection", "keep-alive");
-		return reactor.core.publisher.Mono.fromCallable(() -> conversationService.submit(sessionId, request))
-				.subscribeOn(reactor.core.scheduler.Schedulers.boundedElastic())
-				.flatMapMany(prepared -> executePrepared(sessionId, request, prepared));
+		return Flux.defer(() -> {
+			var execution = executionRegistry.begin(sessionId);
+			return reactor.core.publisher.Mono.fromCallable(() -> conversationService.submit(sessionId, request, execution::isCancelled))
+					.subscribeOn(reactor.core.scheduler.Schedulers.boundedElastic())
+					.flatMapMany(prepared -> {
+						if (execution.isCancelled()) return Flux.<ServerSentEvent<GraphNodeResponse>>empty();
+						Flux<ServerSentEvent<GraphNodeResponse>> stream = executePrepared(sessionId, request, prepared);
+						if (execution.isCancelled()) graphService.stopStreamProcessing(prepared.getThreadId());
+						return stream;
+					})
+					.takeUntilOther(execution.cancellation())
+					.onErrorResume(ConversationCancelledException.class, error -> Flux.empty())
+					.doFinally(signal -> execution.close());
+		});
 	}
 
 	private Flux<ServerSentEvent<GraphNodeResponse>> executePrepared(String sessionId,
@@ -108,6 +122,9 @@ public class ConversationController {
 		Sinks.Many<ServerSentEvent<GraphNodeResponse>> sink = Sinks.many().unicast().onBackpressureBuffer();
 		graphService.graphStreamProcess(sink, GraphRequest.builder().agentId(prepared.getAgentId())
 				.conversationId(sessionId).topicId(prepared.getTopicId()).threadId(prepared.getThreadId())
+				.requestedDenominatorScope(prepared.getPlan() != null
+						&& prepared.getPlan().getOperation() == com.alibaba.cloud.ai.dataagent.dto.conversation.OperationPlan.Operation.TRANSFORM
+						? prepared.getPlan().getChanges().getData().getDenominatorScope() : null)
 				.query(request.getUserMessage()).scopeContext(request.getContext()).build());
 		Flux<ServerSentEvent<GraphNodeResponse>> eventStream = plan.concatWith(sink.asFlux());
 		Flux<ServerSentEvent<GraphNodeResponse>> heartbeatStream = Flux

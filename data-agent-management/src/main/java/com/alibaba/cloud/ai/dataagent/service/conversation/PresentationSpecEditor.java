@@ -28,7 +28,7 @@ public class PresentationSpecEditor {
 	public String apply(String sourceSpec, OperationPlan.PresentationChanges changes) {
 		try {
 			ObjectNode spec = parse(sourceSpec);
-			if (changes.getChartType() != null) {
+			if (changes.getChartType() != null && !changes.getChartType().isBlank()) {
 				if (!spec.path("series").isArray()) throw new IllegalArgumentException("rendered chart data unavailable");
 				convertChart(spec, changes.getChartType(), changes);
 			}
@@ -133,6 +133,19 @@ public class PresentationSpecEditor {
 						"当前图表没有可证明完整且互斥的分类，无法直接生成构成饼图。请确认分类互斥且完整，或明确要求按现有指标自身占比展示。",
 						null, parts, null);
 			}
+			if (verified && !percentageMode && !allowPartialPie
+					&& java.util.Set.of("ALL", "SCOPE").contains(spec.path("dataAgent").path("denominatorScope").asText())) {
+				java.math.BigDecimal denominator = spec.path("dataAgent").path("denominator").decimalValue();
+				if (denominator.compareTo(parts) < 0) throw new IllegalArgumentException("比例分母小于分项合计。");
+				if (denominator.compareTo(parts) > 0) {
+					names.add("其他缺陷");
+					pie.addObject().put("name", "其他缺陷").put("value", denominator.subtract(parts));
+				}
+			}
+			if (verified && allowPartialPie) {
+				spec.with("dataAgent").put("denominatorScope", "SELECTED").put("denominator", parts)
+						.put("completePartition", true);
+			}
 		}
 		ObjectNode next = JsonUtil.getObjectMapper().createObjectNode();
 		next.put("type", type);
@@ -178,6 +191,8 @@ public class PresentationSpecEditor {
 			if (!meta.path("verified").asBoolean() || !meta.path("mutuallyExclusive").asBoolean()) {
 				throw new IllegalArgumentException("缺少经过验证的指标来源，不能直接计算比例。");
 			}
+			if (!java.util.Set.of("ALL", "SCOPE", "SELECTED", "TOP").contains(scope)) throw new IllegalArgumentException("未知的比例分母范围。");
+			if ("ALL".equals(scope) && !meta.path("allTotal").isNumber()) throw new IllegalArgumentException("缺少全部缺陷分母，必须重新查询。");
 			var items = JsonUtil.getObjectMapper().createArrayNode();
 			java.math.BigDecimal selectedTotal = java.math.BigDecimal.ZERO;
 			for (JsonNode item : meta.path("baseItems")) {
@@ -185,10 +200,11 @@ public class PresentationSpecEditor {
 				items.add(item.deepCopy());
 				selectedTotal = selectedTotal.add(item.path("value").decimalValue());
 			}
-			java.math.BigDecimal denominator = "ALL".equals(scope) ? meta.path("allTotal").decimalValue() : selectedTotal;
+			java.math.BigDecimal denominator = "ALL".equals(scope) ? meta.path("allTotal").decimalValue()
+					: "SCOPE".equals(scope) ? meta.path("denominator").decimalValue() : selectedTotal;
 			if (denominator.signum() <= 0 || denominator.compareTo(selectedTotal) < 0) throw new IllegalArgumentException("比例分母无效。");
 			boolean pie = "pie".equals(spec.at("/series/0/type").asText());
-			if (pie && "ALL".equals(scope) && denominator.compareTo(selectedTotal) > 0) {
+			if (pie && java.util.Set.of("ALL", "SCOPE").contains(scope) && denominator.compareTo(selectedTotal) > 0) {
 				items.addObject().put("id", "other").put("name", "其他缺陷").put("value", denominator.subtract(selectedTotal));
 			}
 			var names = JsonUtil.getObjectMapper().createArrayNode();
@@ -207,7 +223,7 @@ public class PresentationSpecEditor {
 				spec.with("xAxis").set("data", names);
 				spec.with("yAxis").put("name", "比例 (%)");
 			}
-			spec.with("title").put("text", "ALL".equals(scope) ? "占全部缺陷比例" : "所选缺陷自身占比");
+			spec.with("title").put("text", "ALL".equals(scope) ? "占全部缺陷比例" : "SCOPE".equals(scope) ? "占当前统计范围比例" : "所选缺陷自身占比");
 			ObjectNode updated = (ObjectNode) meta;
 			updated.put("denominator", denominator).put("denominatorScope", scope).put("percentage", !pie).put("valueMode", "PERCENTAGE");
 			return spec.toString();
@@ -299,6 +315,13 @@ public class PresentationSpecEditor {
 			return;
 		}
 		ObjectNode axis = spec.with(key);
+		Double effectiveMin = min != null ? min : axis.path("min").isNumber() ? axis.path("min").asDouble() : null;
+		Double effectiveMax = max != null ? max : axis.path("max").isNumber() ? axis.path("max").asDouble() : null;
+		if ((effectiveMin != null && !Double.isFinite(effectiveMin))
+				|| (effectiveMax != null && !Double.isFinite(effectiveMax))
+				|| (effectiveMin != null && effectiveMax != null && effectiveMin >= effectiveMax)) {
+			throw new IllegalArgumentException("坐标轴下限必须小于上限，请提供有效范围。");
+		}
 		if (min != null) axis.put("min", min);
 		if (max != null) axis.put("max", max);
 	}

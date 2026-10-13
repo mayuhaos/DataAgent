@@ -30,6 +30,8 @@ import static com.alibaba.cloud.ai.dataagent.prompt.PromptHelper.buildSemanticMo
 import com.alibaba.cloud.ai.dataagent.bo.DbConfigBO;
 import com.alibaba.cloud.ai.dataagent.dto.schema.SchemaDTO;
 import com.alibaba.cloud.ai.dataagent.dto.schema.TableDTO;
+import com.alibaba.cloud.ai.dataagent.dto.prompt.SqlGenerationDTO;
+import com.alibaba.cloud.ai.dataagent.util.PaintDefectAnalysis;
 import com.alibaba.cloud.ai.dataagent.entity.AgentDatasource;
 import com.alibaba.cloud.ai.dataagent.entity.LogicalRelation;
 import com.alibaba.cloud.ai.dataagent.entity.SemanticModel;
@@ -189,16 +191,36 @@ public class TableRelationNode implements NodeAction {
 	private Flux<ChatResponse> processSchemaSelection(SchemaDTO schemaDTO, String input, String evidence,
 			OverAllState state, DbConfigBO agentDbConfig, Consumer<SchemaDTO> dtoConsumer) {
 		String schemaAdvice = StateUtil.getStringValue(state, SQL_GENERATE_SCHEMA_MISSING_ADVICE, null);
+		var boundedRequest = SqlGenerationDTO.builder().query(input).schemaDTO(schemaDTO)
+				.originalQuery(StateUtil.getStringValue(state,
+						com.alibaba.cloud.ai.dataagent.constant.Constant.ORIGINAL_USER_QUERY, input))
+				.scopeRestricted(StateUtil.getStringValue(state,
+						com.alibaba.cloud.ai.dataagent.constant.Constant.MULTI_TURN_CONTEXT, "").contains("服务端强制数据范围"))
+				.build();
+		List<TableDTO> required = PaintDefectAnalysis.query(boundedRequest).isPresent()
+				? schemaDTO.getTable().stream().filter(table -> Set.of("paint_defect_detail", "paint_defect_dictionary")
+						.contains(table.getName())).toList() : List.of();
+		Consumer<SchemaDTO> selectedConsumer = selected -> {
+			if (!required.isEmpty()) {
+				List<TableDTO> tables = new ArrayList<>(selected.getTable() == null ? List.of() : selected.getTable());
+				for (TableDTO table : required) {
+					if (tables.stream().noneMatch(existing -> table.getName().equals(existing.getName()))) tables.add(table);
+				}
+				selected.setTable(tables);
+				selected.setTableCount(tables.size());
+			}
+			dtoConsumer.accept(selected);
+		};
 
 		Flux<ChatResponse> schemaFlux;
 		if (schemaAdvice != null) {
 			log.info("[{}] Processing with schema supplement advice: {}", this.getClass().getSimpleName(),
 					schemaAdvice);
-			schemaFlux = nl2SqlService.fineSelect(schemaDTO, input, evidence, schemaAdvice, agentDbConfig, dtoConsumer);
+			schemaFlux = nl2SqlService.fineSelect(schemaDTO, input, evidence, schemaAdvice, agentDbConfig, selectedConsumer);
 		}
 		else {
 			log.info("[{}] Executing regular schema selection", this.getClass().getSimpleName());
-			schemaFlux = nl2SqlService.fineSelect(schemaDTO, input, evidence, null, agentDbConfig, dtoConsumer);
+			schemaFlux = nl2SqlService.fineSelect(schemaDTO, input, evidence, null, agentDbConfig, selectedConsumer);
 		}
 		return Flux
 			.just(ChatResponseUtil.createResponse("正在选择合适的数据表...\n"),

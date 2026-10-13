@@ -68,6 +68,16 @@ class PaintDefectAnalysisTest {
 	}
 
 	@Test
+	void missingSpecificDefectCannotBeReplacedWithItsParentTotal() {
+		String report = PaintDefectAnalysis.report("查询一厂2026年6月喷涂设备环境大类中的前划完整明细数量",
+				Map.of("step_1", snapshot())).orElseThrow();
+		assertTrue(report.contains("未查到"));
+		assertTrue(report.contains("前划"));
+		assertFalse(report.contains("| 4 | 设备环境 | 215 |"));
+		assertFalse(report.contains("塑件缺陷—前划"));
+	}
+
+	@Test
 	void redundantMonthRangeDoesNotDisableTemplateButDifferentRangeDoes() {
 		assertTrue(PaintDefectAnalysis.query(input("查询一厂2026年6月（2026-06-01至2026-06-30）喷涂完整缺陷数量")).isPresent());
 		assertTrue(PaintDefectAnalysis.query(input("查询一厂2026年6月（2026-06-01至2026-06-15）喷涂完整缺陷数量")).isEmpty());
@@ -113,5 +123,88 @@ class PaintDefectAnalysisTest {
 		assertThrows(IllegalStateException.class, () -> PaintDefectAnalysis.report("设备环境", Map.of("step_1", snapshot().replace("\"category\":\"塑件缺陷\"", "\"category\":null"))));
 		assertThrows(IllegalStateException.class, () -> PaintDefectAnalysis.report("缺陷", Map.of("step_1", snapshot().replace("\"column\"", "\"truncated\":true,\"column\""))));
 		assertThrows(IllegalStateException.class, () -> PaintDefectAnalysis.report("缺陷", Map.of("step_1", snapshot(), "step_2", snapshot().replace("\"58\"", "\"71\""))));
+	}
+
+	@Test
+	void topWithinParentKeepsParentFilterAndDoesNotRankOtherParents() {
+
+		String question = "查询一厂2026年6月喷涂设备环境大类内部的真实具体缺陷Top3，按完整明细统计。";
+		assertTrue(PaintDefectAnalysis.query(input(question)).orElseThrow().contains("p.defect_name IN ('设备环境')"));
+		String report = PaintDefectAnalysis.report(question, Map.of("step_1", snapshot())).orElseThrow();
+		assertFalse(report.contains("塑件缺陷—前划"));
+		assertTrue(report.contains("比例分母：215"));
+		assertTrue(report.contains("\"denominatorScope\":\"SCOPE\""));
+		assertFalse(report.contains("\"allTotal\""));
+	}
+
+	@Test
+	void topOneUsesExactlyOneItem() {
+		String question = "一厂2026年6月喷涂全部完整具体缺陷Top1数量，用柱状图展示";
+		assertTrue(PaintDefectAnalysis.query(input(question)).isPresent());
+		String report = PaintDefectAnalysis.report(question, Map.of("step_1", snapshot())).orElseThrow();
+		assertTrue(report.contains("设备环境—杂质"));
+		assertFalse(report.contains("塑件缺陷—前划"));
+		assertFalse(report.contains("喷房缺陷—缺陷B"));
+	}
+
+	@Test
+	void selectedCategoriesCanUseFullDenominator() {
+		String question = "一厂2026年6月塑件缺陷、喷房缺陷各占全部喷涂缺陷数量的比例，用柱状图展示";
+		assertFalse(PaintDefectAnalysis.query(input(question)).orElseThrow().contains("p.defect_name IN"));
+		String report = PaintDefectAnalysis.report(question, Map.of("step_1", snapshot().replace("\"scope_start_date\"", "\"scope_all_categories\":1,\"scope_start_date\""))).orElseThrow();
+		assertTrue(report.contains("比例分母：334"));
+		assertTrue(report.contains("17.37%"));
+		assertTrue(report.contains("18.26%"));
+		assertFalse(report.contains("| 4 | 设备环境"));
+	}
+
+	@Test
+	void exclusionDoesNotIncludeTheExcludedParent() {
+		String question = "一厂2026年6月喷涂全部完整缺陷明细，排除设备环境大类后，各大类数量和总计是多少";
+		String report = PaintDefectAnalysis.report(question, Map.of("step_1", snapshot())).orElseThrow();
+		assertTrue(report.contains("所选分类合计：119"));
+		assertFalse(report.contains("| 4 | 设备环境"));
+	}
+
+	@Test
+	void orderedChartsFollowUserOrderInsteadOfFixedThreeChartLayout() {
+		String question = "一厂2026年6月喷涂完整缺陷明细，统计塑件缺陷、喷房缺陷、设备环境，生成三张图：第1张为全部具体缺陷Top3数量柱状图；第2张为三类数量柱状图；第3张为三类自身占比饼图。";
+		String report = PaintDefectAnalysis.report(question, Map.of("step_1", snapshot())).orElseThrow();
+		int firstChart = report.indexOf("```echarts");
+		int secondChart = report.indexOf("```echarts", firstChart + 1);
+		assertTrue(report.substring(firstChart, secondChart).contains("设备环境—杂质"));
+		assertFalse(report.substring(firstChart, secondChart).contains("\"name\":\"设备环境\""));
+	}
+
+	@Test
+	void parentInternalTopDoesNotMeanTopInternalDenominator() {
+		String question = "一厂2026年6月喷涂设备环境大类内部的真实具体缺陷Top3各占设备环境合计多少，用柱状图展示";
+		String report = PaintDefectAnalysis.report(question, Map.of("step_1", snapshot())).orElseThrow();
+		assertTrue(report.contains("比例分母：215"));
+		assertTrue(report.contains("\"denominatorScope\":\"SCOPE\""));
+	}
+
+	@Test
+	void topOwnSharesUseTopSumAndKeepFullDenominatorForLaterEdits() {
+		String question = "一厂2026年6月喷涂全部具体缺陷Top3，在这三个缺陷之间比较占比，用柱状图展示";
+		assertTrue(PaintDefectAnalysis.query(input(question)).isPresent());
+		String report = PaintDefectAnalysis.report(question, Map.of("step_1", snapshot().replace("\"scope_start_date\"", "\"scope_all_categories\":1,\"scope_start_date\""))).orElseThrow();
+		assertTrue(report.contains("\"denominatorScope\":\"SELECTED\""));
+		assertTrue(report.contains("\"allTotal\":334"));
+	}
+
+	@Test
+	void namedDefectCanUseFullDenominatorInsteadOfItsOwnValue() {
+		String question = "一厂2026年6月喷涂杂质占全部缺陷多少";
+		String report = PaintDefectAnalysis.report(question, Map.of("step_1", snapshot().replace("\"scope_start_date\"", "\"scope_all_categories\":1,\"scope_start_date\""))).orElseThrow();
+		assertTrue(report.contains("比例分母：334"));
+		assertTrue(report.contains("64.37%"));
+	}
+
+	@Test
+	void doesNotIgnoreAdditionalConditionsOrUnrecognizedRanks() {
+		for (String question : List.of("一厂2026年6月喷涂完整缺陷数量大于100的具体缺陷", "一厂2026年6月喷涂完整缺陷Top0", "一厂2026年6月喷涂完整缺陷Top1000", "一厂2026年6月喷涂完整缺陷平均每天数量")) {
+			assertTrue(PaintDefectAnalysis.query(input(question)).isEmpty(), question);
+		}
 	}
 }

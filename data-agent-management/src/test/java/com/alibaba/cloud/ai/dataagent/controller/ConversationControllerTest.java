@@ -55,17 +55,19 @@ class ConversationControllerTest {
 	@Mock private AnalysisResultStore analysisResultStore;
 	@Mock private ServerHttpResponse response;
 	private ConversationController controller;
+	private com.alibaba.cloud.ai.dataagent.service.conversation.ConversationExecutionRegistry executionRegistry;
 
 	@BeforeEach
 	void setUp() {
+		executionRegistry = new com.alibaba.cloud.ai.dataagent.service.conversation.ConversationExecutionRegistry();
 		controller = new ConversationController(conversationService, conversationTopicService, analysisArtifactService,
-				graphService, analysisResultStore);
+				graphService, analysisResultStore, executionRegistry);
 		when(response.getHeaders()).thenReturn(new HttpHeaders());
 	}
 
 	@Test
 	void planningRunsOutsideTheNonBlockingRequestThread() {
-		when(conversationService.submit(any(), any())).thenAnswer(invocation -> {
+		when(conversationService.submit(any(), any(), any())).thenAnswer(invocation -> {
 			String value = reactor.core.publisher.Mono.just("ready")
 					.delayElement(Duration.ofMillis(5)).block();
 			assertEquals("ready", value);
@@ -81,7 +83,7 @@ class ConversationControllerTest {
 	void requeryPlanIsDispatchedToExistingGraphWithFreshThread() {
 		OperationPlan plan = new OperationPlan();
 		plan.setExecutionMode(OperationPlan.ExecutionMode.REQUERY);
-		when(conversationService.submit(any(), any())).thenReturn(ConversationMessageResponse.builder()
+		when(conversationService.submit(any(), any(), any())).thenReturn(ConversationMessageResponse.builder()
 				.sessionId("s1").agentId("7").topicId("topic-1").threadId("thread-1").plan(plan)
 				.status("DISPATCH_TO_GRAPH").build());
 		doAnswer(invocation -> {
@@ -109,7 +111,7 @@ class ConversationControllerTest {
 	void requeryStreamEmitsHeartbeatsAndNotifiesGraphOnDisconnect() {
 		OperationPlan plan = new OperationPlan();
 		plan.setExecutionMode(OperationPlan.ExecutionMode.REQUERY);
-		when(conversationService.submit(any(), any())).thenReturn(ConversationMessageResponse.builder()
+		when(conversationService.submit(any(), any(), any())).thenReturn(ConversationMessageResponse.builder()
 				.sessionId("s1").agentId("7").topicId("topic-1").threadId("thread-1").plan(plan)
 				.status("DISPATCH_TO_GRAPH").build());
 		ConversationMessageRequest request = new ConversationMessageRequest();
@@ -123,6 +125,36 @@ class ConversationControllerTest {
 				.verify();
 
 		verify(graphService).disconnectStream("thread-1");
+	}
+
+	@Test
+	void stopDuringPlanningClosesStreamAndDoesNotDispatchLatePlan() throws Exception {
+		var entered = new java.util.concurrent.CountDownLatch(1);
+		var release = new java.util.concurrent.CountDownLatch(1);
+		var completed = new java.util.concurrent.CountDownLatch(1);
+		var workerFinished = new java.util.concurrent.CountDownLatch(1);
+		when(conversationService.submit(any(), any(), any())).thenAnswer(invocation -> {
+			entered.countDown();
+			try { release.await(5, java.util.concurrent.TimeUnit.SECONDS); }
+			catch (InterruptedException ignored) { }
+			finally { workerFinished.countDown(); }
+			return ConversationMessageResponse.builder().agentId("7").threadId("late-thread")
+					.status("DISPATCH_TO_GRAPH").build();
+		});
+		var subscription = controller.submit("s1", new ConversationMessageRequest(), response)
+				.subscribe(event -> {}, error -> completed.countDown(), completed::countDown);
+		try {
+			org.junit.jupiter.api.Assertions.assertTrue(entered.await(5, java.util.concurrent.TimeUnit.SECONDS));
+			org.junit.jupiter.api.Assertions.assertTrue(executionRegistry.cancel("s1"));
+			org.junit.jupiter.api.Assertions.assertTrue(completed.await(5, java.util.concurrent.TimeUnit.SECONDS));
+			release.countDown();
+			org.junit.jupiter.api.Assertions.assertTrue(workerFinished.await(5, java.util.concurrent.TimeUnit.SECONDS));
+			org.mockito.Mockito.verifyNoInteractions(graphService);
+			try (var next = executionRegistry.begin("s1")) {
+				org.junit.jupiter.api.Assertions.assertFalse(next.isCancelled());
+			}
+		}
+		finally { release.countDown(); subscription.dispose(); }
 	}
 
 }

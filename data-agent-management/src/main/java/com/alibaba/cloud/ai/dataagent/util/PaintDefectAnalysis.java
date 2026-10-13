@@ -16,6 +16,9 @@ import java.util.regex.Pattern;
 /** Bounded full-detail defect aggregates with server-rendered, traceable chart values. */
 public final class PaintDefectAnalysis {
 
+	private static final Pattern CATEGORIES = Pattern.compile("塑件缺陷|喷房缺陷|设备环境|条线缺陷");
+	private static final Pattern TOP = Pattern.compile("(?i)(?:top\\s*|前\\s*)(\\d+|[一二三四五六七八九十]+)");
+
 	private PaintDefectAnalysis() { }
 
 	public static Optional<String> query(SqlGenerationDTO input) {
@@ -32,7 +35,8 @@ public final class PaintDefectAnalysis {
 		if (Pattern.compile("注塑|打磨|终检|尺寸|毛坯").matcher(question).find()) return Optional.empty();
 		// This template deliberately abstains from additional entity filters and trends.
 		String scopeText = question.replace("喷涂下线产品缺陷表", "喷涂缺陷表");
-		if (Pattern.compile("型号|产品|颜色|红色|黑色|客户|供应商|车间|产线|批次号|批次编号|每天|逐日|趋势|按日期|按批次|去重|样本|点位").matcher(scopeText).find()) return Optional.empty();
+		if (Pattern.compile("型号|产品|颜色|红色|黑色|客户|供应商|车间|产线|批次号|批次编号|每天|逐日|趋势|按日期|按批次|去重|样本|点位|平均|大于|小于|超过|至少|最多|不超过|同比|环比|增长|差值|之差").matcher(scopeText).find()) return Optional.empty();
+		if (TOP.matcher(question).find() && topLimit(question) == 0) return Optional.empty();
 		if (Pattern.compile("二厂|三厂|四厂|五厂|所有工厂|各厂|全厂|跨厂").matcher(question).find()) return Optional.empty();
 		if (!question.contains("一厂") && !question.contains("factory_id=1")) return Optional.empty();
 		var date = Pattern.compile("(?<!\\d)(20\\d{2}|\\d{2})年\\s*(\\d{1,2})月(?:\\s*(\\d{1,2})(?:日|号))?").matcher(question);
@@ -55,8 +59,9 @@ public final class PaintDefectAnalysis {
 					+ "1 AS quality_record_snapshot_version FROM paint_defect_detail WHERE factory_id = 1 "
 					+ "AND stat_date >= '" + start + "' AND stat_date < '" + end + "'");
 		}
-		boolean allCategories = Pattern.compile("(?i)top\\s*3|前三|前\\s*3").matcher(question).find() || allCategoryRequest(question);
-		var categoryNames = Pattern.compile("塑件缺陷|喷房缺陷|设备环境|条线缺陷").matcher(question).results().map(match -> match.group()).distinct().toList();
+		var categoryNames = CATEGORIES.matcher(question).results().map(match -> match.group()).distinct().toList();
+		boolean allCategories = (topLimit(question) > 0 && categoryNames.isEmpty()) || allCategoryRequest(question)
+				|| usesAllDenominator(question) || !excludedCategories(question).isEmpty() || isMultiChart(question);
 		boolean supportedChild = Pattern.compile("杂质|前划|水滴|漆滴").matcher(question).find();
 		if (categoryNames.isEmpty() && !allCategories && !supportedChild
 				&& !question.matches("(?s).*(?:喷涂(?:完整)?缺陷(?:明细)?(?:数量|总数|总计)|(?:每个|各).*缺陷).*")) return Optional.empty();
@@ -115,20 +120,29 @@ public final class PaintDefectAnalysis {
 			categories.put(categoryId, new Item(categoryId, category, previous == null ? value : previous.value().add(value)));
 			defects.add(new Item(row.path("defect_id").asText(), category + "—" + defect, value));
 		}
+		List<String> excluded = excludedCategories(question);
 		List<Item> selected = categories.values().stream().filter(item -> question.contains(item.name())).toList();
-		boolean top = Pattern.compile("(?i)top\\s*3|前三|前\\s*3").matcher(question).find();
-		boolean multi = Pattern.compile("(?:三|3)张图").matcher(question).find();
-		if (selected.isEmpty() || (!multi && top)
-				|| (!multi && allCategoryRequest(question))) selected = new ArrayList<>(categories.values());
+		int limit = topLimit(question);
+		boolean top = limit > 0;
+		boolean multi = isMultiChart(question);
+		if (selected.isEmpty() || (!multi && allCategoryRequest(question)) || !excluded.isEmpty()) selected = new ArrayList<>(categories.values());
+		selected = selected.stream().filter(item -> !excluded.contains(item.name())).toList();
 		BigDecimal total = sum(new ArrayList<>(categories.values()));
 		BigDecimal selectedTotal = sum(selected);
-		List<Item> topItems = defects.stream().sorted(java.util.Comparator.comparing(Item::value).reversed().thenComparing(Item::id)).limit(3).toList();
+		List<Item> selectedCategories = selected;
+		List<Item> rankedDefects = defects.stream().filter(item -> multi || selectedCategories.stream()
+				.anyMatch(category -> item.name().startsWith(category.name() + "—"))).toList();
+		List<Item> topItems = rankedDefects.stream().sorted(java.util.Comparator.comparing(Item::value).reversed().thenComparing(Item::id)).limit(top ? limit : 3).toList();
 		StringBuilder output = new StringBuilder("## 喷涂完整缺陷统计\n\n");
 		output.append("统计口径：完整缺陷明细的缺陷数量求和，非去重不良产品数。\n\n");
 		if (question.contains("是不是没数据") && selectedTotal.signum() > 0) output.append("“没有数据”的前提不成立，下表为数据库实际统计结果。\n\n");
 		if (snapshot.path("data").isEmpty()) return Optional.of(output.append("数据库未查到记录，不能据此认定实际没有不良。\n").toString());
 		JsonNode scope = snapshot.path("data").get(0);
 		BigDecimal allTotal = scope.path("scope_all_categories").asInt() == 1 ? total : null;
+		boolean ownTopShares = top && !multi && Pattern.compile("(?i)(?:这|那)[一二三四五六七八九十0-9]+个缺陷(?:之间|自身|内部|合计)|它们的合计|所选缺陷自身|(?:top\\s*\\d+|前[一二三四五六七八九十0-9]+)(?:自身|内部|之间|合计)").matcher(question).find()
+				&& (question.contains("占") || question.contains("比例"));
+		BigDecimal denominator = ownTopShares ? sum(topItems) : usesAllDenominator(question) ? total : selectedTotal;
+		if (usesAllDenominator(question) && allTotal == null) throw new IllegalStateException("缺少全部缺陷分母，不能生成占全部的比例报告。");
 		output.append("范围：一厂，").append(scope.path("scope_start_date").asText()).append("（含）至 ")
 				.append(scope.path("scope_end_date").asText()).append("（不含）。\n\n");
 		if (question.contains("设备环境") && question.contains("杂质") && question.contains("互斥")) {
@@ -142,31 +156,50 @@ public final class PaintDefectAnalysis {
 		if (question.contains("合计") && question.contains("四项") && question.contains("饼图")) {
 			output.append("合计包含各分项，不能再次作为饼图分类。下面仅展示分项，分母为分项合计。\n\n");
 		}
-		List<Item> namedDefects = defects.stream().filter(item -> question.contains(item.name().substring(item.name().indexOf('—') + 1))).toList();
+		List<String> requestedDefects = Pattern.compile("杂质|前划|水滴|漆滴").matcher(question).results()
+				.map(match -> match.group()).distinct().toList();
+		List<Item> namedDefects = rankedDefects.stream().filter(item -> question.contains(item.name().substring(item.name().indexOf('—') + 1))).toList();
+		if (!top && !multi && !requestedDefects.isEmpty()) {
+			List<String> missing = requestedDefects.stream().filter(name -> namedDefects.stream()
+					.noneMatch(item -> item.name().endsWith("—" + name))).toList();
+			if (!missing.isEmpty()) output.append("在指定工厂、日期和大类范围内，未查到以下具体缺陷的明细：")
+					.append(String.join("、", missing)).append("。不能以大类合计代替具体缺陷数量，也不能据此认定实际没有该缺陷。\n\n");
+			if (namedDefects.isEmpty()) return Optional.of(output.toString());
+		}
 		if (!top && !multi && !namedDefects.isEmpty()) {
-			table(output, namedDefects, sum(namedDefects));
+			table(output, namedDefects, usesAllDenominator(question) ? total : sum(namedDefects));
 			output.append("名称中横线前为所属大类，横线后为具体缺陷；数量按当前日期范围的完整明细统计。\n\n");
 			return Optional.of(output.toString());
 		}
 		if (top && !multi) {
-			table(output, topItems, total);
-			output.append("全部缺陷数量：").append(number(total)).append("；Top3 合计：").append(number(sum(topItems))).append("。\n\n");
+			table(output, topItems, denominator);
+			output.append("当前统计范围缺陷数量：").append(number(denominator)).append("；Top").append(limit).append(" 合计：").append(number(sum(topItems))).append("。\n\n");
 			List<Item> chartItems = new ArrayList<>(topItems);
 			boolean pie = question.contains("饼");
-			if (pie && total.compareTo(sum(topItems)) > 0) chartItems.add(new Item("other", "其他缺陷", total.subtract(sum(topItems))));
-			output.append(chart(chartItems, pie ? "pie" : "bar", question.contains("占") || question.contains("比例") ? "Top3占全部缺陷比例" : "完整缺陷Top3数量", total, step, allTotal, "ALL"));
+			if (pie && denominator.compareTo(sum(topItems)) > 0) chartItems.add(new Item("other", "其他缺陷", denominator.subtract(sum(topItems))));
+			output.append(chart(chartItems, pie ? "pie" : "bar", question.contains("占") || question.contains("比例") ? "Top" + limit + (ownTopShares ? "自身占比" : "占当前范围缺陷比例") : "完整缺陷Top" + limit + "数量", denominator, step, allTotal, ownTopShares ? "SELECTED" : allTotal == null ? "SCOPE" : "ALL"));
 		}
 		else {
-			table(output, selected, selectedTotal);
+			table(output, selected, denominator);
 			output.append("所选分类合计：").append(number(selectedTotal)).append("；当前查询范围的缺陷数量：").append(number(total)).append("。\n\n");
 			boolean pie = question.contains("饼");
 			if (multi) {
-				output.append(chart(selected, "bar", "所选分类缺陷数量", selectedTotal, step, allTotal, "SELECTED"));
-				output.append(chart(selected, "pie", "所选分类自身占比", selectedTotal, step, allTotal, "SELECTED"));
-				output.append(chart(topItems, "bar", "全部具体缺陷Top3数量", sum(topItems), step, allTotal, "TOP"));
+				List<String> requests = chartRequests(question);
+				for (String request : requests) {
+					boolean ranked = topLimit(request) > 0;
+					List<Item> items = ranked ? rankedDefects.stream().sorted(java.util.Comparator.comparing(Item::value).reversed().thenComparing(Item::id)).limit(topLimit(request)).toList() : selected;
+					boolean share = request.contains("占") || request.contains("比例");
+					boolean requestPie = request.contains("饼");
+					BigDecimal chartDenominator = usesAllDenominator(request) ? total : sum(items);
+					List<Item> chartItems = new ArrayList<>(items);
+					if (requestPie && chartDenominator.compareTo(sum(items)) > 0) chartItems.add(new Item("other", "其他缺陷", chartDenominator.subtract(sum(items))));
+					output.append(chart(chartItems, requestPie ? "pie" : "bar", (ranked ? "完整具体缺陷Top" + topLimit(request) : "所选分类") + (share ? "占比" : "数量"), chartDenominator, step, allTotal, usesAllDenominator(request) ? "ALL" : ranked ? "TOP" : "SELECTED"));
+				}
 			}
 			else if (question.contains("柱") || pie || question.contains("展示") || question.contains("各") || question.contains("汇总")) {
-				output.append(chart(selected, pie ? "pie" : "bar", question.contains("占") || question.contains("比例") ? "所选分类自身占比" : "所选分类缺陷数量", selectedTotal, step, allTotal, "SELECTED"));
+				List<Item> chartItems = new ArrayList<>(selected);
+				if (pie && denominator.compareTo(selectedTotal) > 0) chartItems.add(new Item("other", "其他缺陷", denominator.subtract(selectedTotal)));
+				output.append(chart(chartItems, pie ? "pie" : "bar", question.contains("占") || question.contains("比例") ? usesAllDenominator(question) ? "所选分类占全部缺陷比例" : "所选分类自身占比" : "所选分类缺陷数量", denominator, step, allTotal, usesAllDenominator(question) ? "ALL" : "SELECTED"));
 			}
 		}
 		return Optional.of(output.toString());
@@ -175,8 +208,46 @@ public final class PaintDefectAnalysis {
 	public record Item(String id, String name, BigDecimal value) { }
 
 	private static boolean allCategoryRequest(String question) {
+		if (usesAllDenominator(question)) return false;
 		return Pattern.compile("(?:全部|所有)(?:喷涂)?缺陷|(?:全部|所有)具体缺陷").matcher(question).find()
 				&& !Pattern.compile("(?:大类|设备环境|塑件缺陷|喷房缺陷|条线缺陷)(?:下|内部|中)").matcher(question).find();
+	}
+
+	private static boolean usesAllDenominator(String question) {
+		return Pattern.compile("(?:占|分母[^，,；;。]*)(?:全部|所有)(?:喷涂)?(?:具体)?缺陷").matcher(question).find();
+	}
+
+	private static int topLimit(String question) {
+		var matcher = TOP.matcher(question);
+		if (!matcher.find()) return 0;
+		String value = matcher.group(1);
+		int number;
+		try { number = Integer.parseInt(value); }
+		catch (NumberFormatException ex) { number = List.of("", "一", "二", "三", "四", "五", "六", "七", "八", "九", "十").indexOf(value); }
+		return number > 0 && number <= 50 ? number : 0;
+	}
+
+	private static List<String> excludedCategories(String question) {
+		var excluded = new ArrayList<String>();
+		var matcher = Pattern.compile("(?:排除|不含|不包括|除去|剔除|除了)([^，,；;。]*?)(?:大类|后|以外|之外|$)").matcher(question);
+		while (matcher.find()) CATEGORIES.matcher(matcher.group(1)).results().map(match -> match.group()).forEach(excluded::add);
+		return excluded;
+	}
+
+	private static boolean isMultiChart(String question) { return Pattern.compile("(?:三|3)张图").matcher(question).find(); }
+
+	private static List<String> chartRequests(String question) {
+		var requests = new java.util.TreeMap<Integer, String>();
+		var matcher = Pattern.compile("第\\s*([123一二三])\\s*张(?:图)?(?:为|是)?\\s*(.*?)(?=第\\s*[123一二三]\\s*张|$)", Pattern.DOTALL).matcher(question);
+		while (matcher.find()) {
+			String ordinal = matcher.group(1);
+			int index = "一二三".indexOf(ordinal) + 1;
+			if (index == 0) index = Integer.parseInt(ordinal);
+			requests.put(index, matcher.group(2));
+		}
+		if (requests.isEmpty()) return List.of("三类数量柱状图", "三类自身占比饼图", "全部具体缺陷Top3数量柱状图");
+		if (requests.size() != 3) throw new IllegalStateException("三张图的展示要求不完整，请分别说明每张图的指标和类型。");
+		return new ArrayList<>(requests.values());
 	}
 
 	private static BigDecimal sum(List<Item> items) { return items.stream().map(Item::value).reduce(BigDecimal.ZERO, BigDecimal::add); }

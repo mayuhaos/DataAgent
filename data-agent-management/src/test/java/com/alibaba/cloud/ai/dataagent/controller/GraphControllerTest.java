@@ -52,11 +52,21 @@ class GraphControllerTest {
 	private HttpHeaders httpHeaders;
 
 	private GraphController graphController;
+	private com.alibaba.cloud.ai.dataagent.service.conversation.ConversationExecutionRegistry executionRegistry;
 
 	@BeforeEach
 	void setUp() {
-		graphController = new GraphController(graphService);
+		executionRegistry = new com.alibaba.cloud.ai.dataagent.service.conversation.ConversationExecutionRegistry();
+		graphController = new GraphController(graphService, executionRegistry);
 		when(serverHttpResponse.getHeaders()).thenReturn(httpHeaders);
+	}
+
+	@Test
+	void stopBySessionAlsoCancelsPlanningBeforeGraphThreadExists() {
+		try (var pending = executionRegistry.begin("session-1")) {
+			assertTrue(graphController.stopStream(null, "session-1").get("cancelled"));
+			assertTrue(pending.isCancelled());
+		}
 	}
 
 	@Test

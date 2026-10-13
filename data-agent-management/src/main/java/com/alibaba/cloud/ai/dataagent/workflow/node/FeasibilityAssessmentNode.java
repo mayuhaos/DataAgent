@@ -16,6 +16,7 @@
 package com.alibaba.cloud.ai.dataagent.workflow.node;
 
 import com.alibaba.cloud.ai.dataagent.dto.prompt.FeasibilityAssessmentOutputDTO;
+import com.alibaba.cloud.ai.dataagent.dto.prompt.SqlGenerationDTO;
 import com.alibaba.cloud.ai.dataagent.dto.schema.SchemaDTO;
 import com.alibaba.cloud.ai.dataagent.enums.TextType;
 import com.alibaba.cloud.ai.dataagent.prompt.PromptHelper;
@@ -25,6 +26,7 @@ import com.alibaba.cloud.ai.dataagent.util.FluxUtil;
 import com.alibaba.cloud.ai.dataagent.util.JsonParseUtil;
 import com.alibaba.cloud.ai.dataagent.util.MarkdownParserUtil;
 import com.alibaba.cloud.ai.dataagent.util.StateUtil;
+import com.alibaba.cloud.ai.dataagent.util.PaintDefectAnalysis;
 import com.alibaba.cloud.ai.graph.GraphResponse;
 import com.alibaba.cloud.ai.graph.OverAllState;
 import com.alibaba.cloud.ai.graph.action.NodeAction;
@@ -57,6 +59,20 @@ public class FeasibilityAssessmentNode implements NodeAction {
 		SchemaDTO recalledSchema = StateUtil.getObjectValue(state, TABLE_RELATION_OUTPUT, SchemaDTO.class);
 		String evidence = StateUtil.getStringValue(state, EVIDENCE);
 		String multiTurn = StateUtil.getStringValue(state, MULTI_TURN_CONTEXT, "(无)");
+		SqlGenerationDTO boundedRequest = SqlGenerationDTO.builder()
+			.query(canonicalQuery)
+			.originalQuery(StateUtil.getStringValue(state,
+					com.alibaba.cloud.ai.dataagent.constant.Constant.ORIGINAL_USER_QUERY, canonicalQuery))
+			.schemaDTO(recalledSchema)
+			.scopeRestricted(multiTurn.contains("服务端强制数据范围"))
+			.build();
+		if (PaintDefectAnalysis.query(boundedRequest).isPresent()) {
+			FeasibilityAssessmentOutputDTO assessment = new FeasibilityAssessmentOutputDTO();
+			assessment.setRequirementType(FeasibilityAssessmentOutputDTO.RequirementType.DATA_ANALYSIS);
+			assessment.setLanguage("zh-CN");
+			assessment.setContent(canonicalQuery);
+			return Map.of(FEASIBILITY_ASSESSMENT_NODE_OUTPUT, assessment);
+		}
 
 		String prompt = PromptHelper.buildFeasibilityAssessmentPrompt(canonicalQuery, recalledSchema, evidence,
 				multiTurn);

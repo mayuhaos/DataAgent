@@ -18,6 +18,10 @@ package com.alibaba.cloud.ai.dataagent.workflow.node;
 import com.alibaba.cloud.ai.dataagent.dto.schema.SchemaDTO;
 import com.alibaba.cloud.ai.dataagent.enums.TextType;
 import com.alibaba.cloud.ai.dataagent.dto.planner.Plan;
+import com.alibaba.cloud.ai.dataagent.dto.planner.ExecutionStep;
+import com.alibaba.cloud.ai.dataagent.dto.prompt.SqlGenerationDTO;
+import com.alibaba.cloud.ai.dataagent.util.PaintDefectAnalysis;
+import com.alibaba.cloud.ai.dataagent.util.JsonUtil;
 import com.alibaba.cloud.ai.graph.GraphResponse;
 import com.alibaba.cloud.ai.graph.OverAllState;
 import com.alibaba.cloud.ai.graph.action.NodeAction;
@@ -36,6 +40,7 @@ import org.springframework.stereotype.Component;
 import reactor.core.publisher.Flux;
 
 import java.util.Map;
+import java.util.List;
 
 import static com.alibaba.cloud.ai.dataagent.constant.Constant.*;
 
@@ -84,6 +89,19 @@ public class PlannerNode implements NodeAction {
 		// 构建提示参数
 		String semanticModel = (String) state.value(GENEGRATED_SEMANTIC_MODEL_PROMPT).orElse("");
 		SchemaDTO schemaDTO = StateUtil.getObjectValue(state, TABLE_RELATION_OUTPUT, SchemaDTO.class);
+		var boundedRequest = SqlGenerationDTO.builder().query(canonicalQuery).schemaDTO(schemaDTO)
+				.originalQuery(StateUtil.getStringValue(state, ORIGINAL_USER_QUERY, canonicalQuery))
+				.scopeRestricted(StateUtil.getStringValue(state, MULTI_TURN_CONTEXT, "").contains("服务端强制数据范围"))
+				.build();
+		if (validationError == null && PaintDefectAnalysis.query(boundedRequest).isPresent()) {
+			ExecutionStep.ToolParameters query = new ExecutionStep.ToolParameters();
+			query.setInstruction("查询完整缺陷明细，保留缺陷子父字典、原始数量和工厂日期范围，供程序计算排名与比例。");
+			ExecutionStep.ToolParameters report = new ExecutionStep.ToolParameters();
+			report.setSummaryAndRecommendations(canonicalQuery);
+			Plan plan = new Plan("当前明细和缺陷字典支持受控统计，使用一次SQL快照直接生成报告与图表。",
+					List.of(new ExecutionStep(1, SQL_GENERATE_NODE, query), new ExecutionStep(2, REPORT_GENERATOR_NODE, report)));
+			return Flux.just(ChatResponseUtil.createPureResponse(JsonUtil.getObjectMapper().valueToTree(plan).toString()));
+		}
 		String schemaStr = PromptHelper.buildMixMacSqlDbPrompt(schemaDTO, true);
 
 		// 构建用户提示

@@ -111,6 +111,23 @@ class ArtifactReferenceResolverTest {
 	}
 
 	@Test
+	void queryStepsWithoutRenderedChartsDoNotCreatePhantomChartsInTheSameReport() {
+		AnalysisArtifact query1 = AnalysisArtifact.builder().id("query-1").type("QUERY_RESULT")
+				.presentationSpec("{\"type\":\"column\",\"title\":\"中间步骤\"}")
+				.provenance("{\"reportId\":\"report-1\"}").build();
+		AnalysisArtifact query2 = AnalysisArtifact.builder().id("query-2").type("QUERY_RESULT")
+				.presentationSpec("{\"type\":\"column\",\"title\":\"中间步骤2\"}")
+				.provenance("{\"reportId\":\"report-1\"}").build();
+		AnalysisArtifact chart = AnalysisArtifact.builder().id("actual-chart").type("CHART")
+				.parentArtifactId("query-1").presentationSpec("{\"title\":{\"text\":\"缺陷数量\"}}")
+				.provenance("{\"reportId\":\"report-1\",\"chartOrder\":1}").build();
+		var result = resolver.resolve("上面这个图改成饼图", List.of(query1, query2, chart));
+		assertEquals(ArtifactReferenceResolver.Resolution.Status.RESOLVED, result.status());
+		assertEquals("actual-chart", result.artifact().getId());
+		assertEquals(1, resolver.cards(List.of(query1, query2, chart)).size());
+	}
+
+	@Test
 	void usesSplitChartArtifactsInsteadOfTheirQueryResultParent() {
 		AnalysisArtifact query = AnalysisArtifact.builder().id("query-result").type("QUERY_RESULT")
 				.presentationSpec("{\"type\":\"bar\"}").createTime(LocalDateTime.of(2026, 9, 29, 10, 0)).build();

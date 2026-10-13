@@ -157,9 +157,11 @@ public class ArtifactReferenceResolver {
 	}
 
 	private boolean isSupersededQueryResult(AnalysisArtifact artifact, List<AnalysisArtifact> artifacts) {
+		String reportId = provenanceValue(artifact, "reportId");
 		return "QUERY_RESULT".equalsIgnoreCase(artifact.getType()) && artifacts.stream()
 				.anyMatch(candidate -> "CHART".equalsIgnoreCase(candidate.getType())
-						&& artifact.getId().equals(candidate.getParentArtifactId()));
+						&& (artifact.getId().equals(candidate.getParentArtifactId())
+								|| reportId != null && reportId.equals(provenanceValue(candidate, "reportId"))));
 	}
 
 	private boolean isSupersededChart(AnalysisArtifact artifact, List<AnalysisArtifact> artifacts) {

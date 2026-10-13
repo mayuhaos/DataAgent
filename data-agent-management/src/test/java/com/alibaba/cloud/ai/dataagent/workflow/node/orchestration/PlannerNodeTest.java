@@ -36,6 +36,10 @@ import org.mockito.quality.Strictness;
 import com.alibaba.cloud.ai.dataagent.service.llm.LlmService;
 import com.alibaba.cloud.ai.dataagent.util.ChatResponseUtil;
 import com.alibaba.cloud.ai.dataagent.workflow.node.PlannerNode;
+import com.alibaba.cloud.ai.dataagent.dto.schema.SchemaDTO;
+import com.alibaba.cloud.ai.dataagent.dto.schema.TableDTO;
+import com.alibaba.cloud.ai.dataagent.dto.prompt.QueryEnhanceOutputDTO;
+import com.alibaba.cloud.ai.dataagent.util.JsonUtil;
 import com.alibaba.cloud.ai.graph.OverAllState;
 import com.alibaba.cloud.ai.graph.state.strategy.ReplaceStrategy;
 
@@ -133,6 +137,28 @@ class PlannerNodeTest {
 	private void setupBasicState(OverAllState state) {
 		state.updateState(Map.of(QUERY_ENHANCE_NODE_OUTPUT, TEST_QUERY_ENHANCE, TABLE_RELATION_OUTPUT, TEST_SCHEMA,
 				EVIDENCE, "业务知识：用户表包含所有注册用户", GENEGRATED_SEMANTIC_MODEL_PROMPT, ""));
+	}
+
+	@Test
+	void boundedTopRankingUsesOneSnapshotWithoutPythonOrModelReplanning() throws Exception {
+		OverAllState state = createTestState();
+		SchemaDTO schema = new SchemaDTO();
+		TableDTO detail = new TableDTO(); detail.setName("paint_defect_detail");
+		TableDTO dictionary = new TableDTO(); dictionary.setName("paint_defect_dictionary");
+		schema.setTable(List.of(detail, dictionary));
+		QueryEnhanceOutputDTO enhanced = new QueryEnhanceOutputDTO();
+		enhanced.setCanonicalQuery("一厂2026年6月喷涂真实具体缺陷Top3数量，用柱状图展示");
+		state.updateState(Map.of(QUERY_ENHANCE_NODE_OUTPUT, enhanced, TABLE_RELATION_OUTPUT, schema));
+		@SuppressWarnings("unchecked")
+		Flux<com.alibaba.cloud.ai.graph.GraphResponse<com.alibaba.cloud.ai.graph.streaming.StreamingOutput>> stream =
+				(Flux<com.alibaba.cloud.ai.graph.GraphResponse<com.alibaba.cloud.ai.graph.streaming.StreamingOutput>>) plannerNode.apply(state).get(PLANNER_NODE_OUTPUT);
+		@SuppressWarnings("unchecked")
+		Map<String, Object> result = (Map<String, Object>) stream.last().block().resultValue().orElseThrow();
+		var plan = JsonUtil.getObjectMapper().readTree((String) result.get(PLANNER_NODE_OUTPUT));
+		assertEquals(2, plan.path("execution_plan").size());
+		assertEquals(SQL_GENERATE_NODE, plan.path("execution_plan").get(0).path("tool_to_use").asText());
+		assertEquals(REPORT_GENERATOR_NODE, plan.path("execution_plan").get(1).path("tool_to_use").asText());
+		org.mockito.Mockito.verifyNoInteractions(llmService);
 	}
 
 	@Test

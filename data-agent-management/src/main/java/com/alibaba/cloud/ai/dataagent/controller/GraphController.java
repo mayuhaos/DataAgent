@@ -48,6 +48,7 @@ public class GraphController {
 	private static final Duration STREAM_HEARTBEAT_INTERVAL = Duration.ofSeconds(15);
 
 	private final GraphService graphService;
+	private final com.alibaba.cloud.ai.dataagent.service.conversation.ConversationExecutionRegistry executionRegistry;
 
 	@GetMapping(value = "/stream/search", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
 	public Flux<ServerSentEvent<GraphNodeResponse>> streamSearch(@RequestParam("agentId") String agentId,
@@ -123,8 +124,9 @@ public class GraphController {
 	public Map<String, Boolean> stopStream(@RequestParam(value = "threadId", required = false) String threadId,
 			@RequestParam(value = "sessionId", required = false) String sessionId) {
 		boolean cancelled = StringUtils.hasText(threadId) && graphService.stopStreamProcessing(threadId);
-		if (!cancelled && StringUtils.hasText(sessionId)) {
-			cancelled = graphService.stopStreamProcessingByConversationId(sessionId);
+		if (StringUtils.hasText(sessionId)) {
+			cancelled |= executionRegistry.cancel(sessionId);
+			cancelled |= graphService.stopStreamProcessingByConversationId(sessionId);
 		}
 		return Map.of("cancelled", cancelled);
 	}

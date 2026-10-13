@@ -128,7 +128,8 @@ public class ReportGeneratorNode implements NodeAction {
 		// does not need a transport marker or a special first-line format.
 		String lineageMarkdown = buildLineageMarkdown(lineageSources);
 		String original = StateUtil.getStringValue(state, ORIGINAL_USER_QUERY, userInput);
-		boolean explicitAnalysis = original.matches("(?si).*(?:塑件缺陷|喷房缺陷|设备环境|全部|所有|top\\s*3|前三|三张图|总数|总计).*");
+		boolean explicitAnalysis = original.contains("一厂") && original.matches("(?s).*\\d{2}(?:\\d{2})?年.*")
+				&& original.matches("(?si).*(?:塑件缺陷|喷房缺陷|设备环境|条线缺陷|全部|所有|top\\s*\\d+|前[一二三四五六七八九十0-9]+|三张图|总数|总计|杂质|前划|水滴|漆滴).*");
 		var verifiedReport = PaintDefectAnalysis.report(explicitAnalysis ? original : userInput, executionResults);
 		Flux<ChatResponse> generated = verifiedReport.isPresent()
 				? Flux.just(ChatResponseUtil.createPureResponse(verifiedReport.get()))

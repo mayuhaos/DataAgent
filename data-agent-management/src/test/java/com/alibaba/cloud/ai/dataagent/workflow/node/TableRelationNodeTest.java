@@ -29,6 +29,7 @@ import com.alibaba.cloud.ai.dataagent.bo.DbConfigBO;
 import com.alibaba.cloud.ai.dataagent.common.TestFixtures;
 import com.alibaba.cloud.ai.dataagent.dto.prompt.QueryEnhanceOutputDTO;
 import com.alibaba.cloud.ai.dataagent.dto.schema.SchemaDTO;
+import com.alibaba.cloud.ai.dataagent.dto.schema.TableDTO;
 import com.alibaba.cloud.ai.dataagent.entity.AgentDatasource;
 import com.alibaba.cloud.ai.dataagent.service.datasource.AgentDatasourceService;
 import com.alibaba.cloud.ai.dataagent.service.datasource.DatasourceService;
@@ -122,6 +123,33 @@ class TableRelationNodeTest {
 
 	private Document createTableDocument(String tableName) {
 		return new Document("table doc", Map.of("name", tableName));
+	}
+
+	@Test
+	void boundedDefectQueryKeepsDictionaryEvenWhenModelSelectsOnlyDetail() throws Exception {
+		OverAllState state = createTestState();
+		var documents = List.of(createTableDocument("paint_defect_detail"), createTableDocument("paint_defect_dictionary"));
+		state.updateState(Map.of(QUERY_ENHANCE_NODE_OUTPUT,
+				TestFixtures.createQueryEnhanceDTO("一厂2026年6月所有喷涂缺陷大类数量"), EVIDENCE, "evidence", AGENT_ID, "1",
+				TABLE_DOCUMENTS_FOR_SCHEMA_OUTPUT, documents, COLUMN_DOCUMENTS__FOR_SCHEMA_OUTPUT, List.of()));
+		setupCommonMocks("1", documents);
+		org.mockito.Mockito.doAnswer(invocation -> {
+			SchemaDTO schema = invocation.getArgument(3);
+			TableDTO detail = new TableDTO(); detail.setName("paint_defect_detail");
+			TableDTO dictionary = new TableDTO(); dictionary.setName("paint_defect_dictionary");
+			schema.setTable(new ArrayList<>(List.of(detail, dictionary)));
+			return null;
+		}).when(schemaService).buildSchemaFromDocuments(anyString(), anyList(), anyList(), any());
+		when(nl2SqlService.fineSelect(any(), anyString(), anyString(), isNull(), any(), any())).thenAnswer(invocation -> {
+			SchemaDTO schema = invocation.getArgument(0);
+			schema.getTable().removeIf(table -> table.getName().equals("paint_defect_dictionary"));
+			java.util.function.Consumer<SchemaDTO> consumer = invocation.getArgument(5);
+			consumer.accept(schema);
+			return Flux.empty();
+		});
+		tableRelationNode.apply(state);
+		org.mockito.Mockito.verify(semanticModelService).getByAgentIdAndTableNames(eq(1L),
+				argThat(tables -> tables.contains("paint_defect_detail") && tables.contains("paint_defect_dictionary")));
 	}
 
 	@Test

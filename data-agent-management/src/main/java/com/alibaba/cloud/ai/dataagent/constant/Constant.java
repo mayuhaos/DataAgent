@@ -185,6 +185,8 @@ public final class Constant {
 
 	public static final String ORIGINAL_USER_QUERY = "ORIGINAL_USER_QUERY";
 
+	public static final String REQUESTED_DENOMINATOR_SCOPE = "REQUESTED_DENOMINATOR_SCOPE";
+
 	public static final String REFINED_USER_QUERY = "REFINED_USER_QUERY";
 
 	// StreamEvent 常量
